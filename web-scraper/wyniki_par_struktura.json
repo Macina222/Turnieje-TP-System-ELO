@@ -1,0 +1,255 @@
+{
+  "timestamp": "2026-04-24T21:12:13.909488",
+  "page_info": {
+    "links_count": 38,
+    "links_sample": [
+      {
+        "href": "https://turnieje-tp.cioff.pl",
+        "text": ""
+      },
+      {
+        "href": "https://cioff.pl",
+        "text": ""
+      },
+      {
+        "href": "/search",
+        "text": "Wyszukiwarka"
+      },
+      {
+        "href": "/changelog",
+        "text": "Log zmian"
+      },
+      {
+        "href": "/2026",
+        "text": "2026\n\nLiczba turniejów: 1\n\nkomplet wyników\n\nPrzejdź do wyników za sezon 2026"
+      },
+      {
+        "href": "/2025",
+        "text": "2025\n\nLiczba turniejów: 12\n\nkomplet wyników\n\nPrzejdź do wyników za sezon 2025"
+      },
+      {
+        "href": "/2024",
+        "text": "2024\n\nLiczba turniejów: 13\n\nkomplet wyników\n\nPrzejdź do wyników za sezon 2024"
+      },
+      {
+        "href": "/2023",
+        "text": "2023\n\nLiczba turniejów: 12\n\nkomplet wyników\n\nPrzejdź do wyników za sezon 2023"
+      },
+      {
+        "href": "/2022",
+        "text": "2022\n\nLiczba turniejów: 10\n\nkomplet wyników\n\nPrzejdź do wyników za sezon 2022"
+      },
+      {
+        "href": "/2021",
+        "text": "2021\n\nLiczba turniejów: 8\n\nkomplet wyników\n\nPrzejdź do wyników za sezon 2021"
+      },
+      {
+        "href": "/2019",
+        "text": "2019\n\nLiczba turniejów: 16\nBrakujące dane: 1\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2019"
+      },
+      {
+        "href": "/2018",
+        "text": "2018\n\nLiczba turniejów: 15\nBrakujące dane: 3\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2018"
+      },
+      {
+        "href": "/2017",
+        "text": "2017\n\nLiczba turniejów: 16\nBrakujące dane: 1\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2017"
+      },
+      {
+        "href": "/2016",
+        "text": "2016\n\nLiczba turniejów: 14\nBrakujące dane: 2\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2016"
+      },
+      {
+        "href": "/2015",
+        "text": "2015\n\nLiczba turniejów: 11\nBrakujące dane: 6\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2015"
+      },
+      {
+        "href": "/2014",
+        "text": "2014\n\nLiczba turniejów: 11\nBrakujące dane: 5\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2014"
+      },
+      {
+        "href": "/2013",
+        "text": "2013\n\nLiczba turniejów: 4\nBrakujące dane: 7\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2013"
+      },
+      {
+        "href": "/2012",
+        "text": "2012\n\nLiczba turniejów: 4\nBrakujące dane: 10\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2012"
+      },
+      {
+        "href": "/2011",
+        "text": "2011\n\nLiczba turniejów: 9\nBrakujące dane: 2\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2011"
+      },
+      {
+        "href": "/2010",
+        "text": "2010\n\nLiczba turniejów: 7\nBrakujące dane: 6\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2010"
+      },
+      {
+        "href": "/2009",
+        "text": "2009\n\nLiczba turniejów: 8\nBrakujące dane: 4\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2009"
+      },
+      {
+        "href": "/2008",
+        "text": "2008\n\nLiczba turniejów: 11\nBrakujące dane: 4\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2008"
+      },
+      {
+        "href": "/2007",
+        "text": "2007\n\nLiczba turniejów: 4\nBrakujące dane: 9\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2007"
+      },
+      {
+        "href": "/2003",
+        "text": "2003\n\nLiczba turniejów: 2\n\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2003"
+      },
+      {
+        "href": "/2002",
+        "text": "2002\n\nLiczba turniejów: 1\n\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2002"
+      },
+      {
+        "href": "/2001",
+        "text": "2001\n\nLiczba turniejów: 2\n\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2001"
+      },
+      {
+        "href": "/2000",
+        "text": "2000\n\nLiczba turniejów: 1\n\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 2000"
+      },
+      {
+        "href": "/1998",
+        "text": "1998\n\nLiczba turniejów: 1\n\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 1998"
+      },
+      {
+        "href": "/1996",
+        "text": "1996\n\nLiczba turniejów: 1\n\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 1996"
+      },
+      {
+        "href": "/1995",
+        "text": "1995\n\nLiczba turniejów: 1\n\nwyniki archiwalne\n\nPrzejdź do wyników za sezon 1995"
+      }
+    ],
+    "headers": [
+      {
+        "tag": "h1",
+        "text": "Archiwum TP"
+      },
+      {
+        "tag": "h1",
+        "text": "Zgromadzone dane"
+      },
+      {
+        "tag": "h3",
+        "text": "2026"
+      },
+      {
+        "tag": "h3",
+        "text": "2025"
+      },
+      {
+        "tag": "h3",
+        "text": "2024"
+      },
+      {
+        "tag": "h3",
+        "text": "2023"
+      },
+      {
+        "tag": "h3",
+        "text": "2022"
+      },
+      {
+        "tag": "h3",
+        "text": "2021"
+      },
+      {
+        "tag": "h3",
+        "text": "2019"
+      },
+      {
+        "tag": "h3",
+        "text": "2018"
+      },
+      {
+        "tag": "h3",
+        "text": "2017"
+      },
+      {
+        "tag": "h3",
+        "text": "2016"
+      },
+      {
+        "tag": "h3",
+        "text": "2015"
+      },
+      {
+        "tag": "h3",
+        "text": "2014"
+      },
+      {
+        "tag": "h3",
+        "text": "2013"
+      },
+      {
+        "tag": "h3",
+        "text": "2012"
+      },
+      {
+        "tag": "h3",
+        "text": "2011"
+      },
+      {
+        "tag": "h3",
+        "text": "2010"
+      },
+      {
+        "tag": "h3",
+        "text": "2009"
+      },
+      {
+        "tag": "h3",
+        "text": "2008"
+      },
+      {
+        "tag": "h3",
+        "text": "2007"
+      },
+      {
+        "tag": "h3",
+        "text": "2003"
+      },
+      {
+        "tag": "h3",
+        "text": "2002"
+      },
+      {
+        "tag": "h3",
+        "text": "2001"
+      },
+      {
+        "tag": "h3",
+        "text": "2000"
+      },
+      {
+        "tag": "h3",
+        "text": "1998"
+      },
+      {
+        "tag": "h3",
+        "text": "1996"
+      },
+      {
+        "tag": "h3",
+        "text": "1995"
+      },
+      {
+        "tag": "h3",
+        "text": "1994"
+      }
+    ],
+    "tables_count": 0,
+    "lists_count": 1
+  },
+  "api_requests": [
+    {
+      "url": "https://region1.google-analytics.com/g/collect?v=2&tid=G-PFC1GT4CB2&gtm=45je64m2v9232284443za200zd9232284443&_p=1777057930880&gcd=13l3l3l2l1l1&npa=1&dma_cps=a&dma=1&are=1&cid=492983920.1777057931&frm=0&pscdl=noapi&rcb=18&sr=1280x800&uaa=x86&uab=64&uafvl=Not%253AA-Brand%3B99.0.0.0%7CHeadlessChrome%3B145.0.7632.6%7CChromium%3B145.0.7632.6&uam=&uamb=0&uap=Windows&uapv=10.0&uaw=0&ul=pl-pl&_s=1&tag_exp=0~115616985~115938465~115938468~116363098~117266401~117512543&sid=1777057931&sct=1&seg=0&dl=https%3A%2F%2Farchiwum-tp.cioff.pl%2F&dt=Archiwum%20TP&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=375",
+      "method": "POST",
+      "post_data": null
+    }
+  ]
+}
