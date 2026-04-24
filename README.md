@@ -2,6 +2,14 @@
 
 Prosty kalkulator rankingu ELO dla par tanecznych na podstawie wyników [turniejów tańców polskich PS Cioff](https://turnieje-tp.cioff.pl/). Projekt przetwarza pliki z wynikami zapisane w katalogu `rsc/`, aktualizuje wspólny ranking par i zapisuje końcową tabelę do `ranking.txt`.
 
+## Autorzy Projektu
+
+Projekt jest tworzony z pasją przez tancerzy Teatru Tańca UW "Warszawianka":
+
+- **Maciej Zych** — kod, logika kalkulatora
+- **Krzysztof Mrozik** — kod, logiga web-scrapera
+- **Mateusz Zych** — PR, nagłaśnianie projektu, rozmowy z osobami decyzyjnymi
+
 ## Cel projektu
 
 System ma oszacować siłę pary tanecznej na podstawie zajmowanych lokat. Zamiast przechowywać wyłącznie miejsca z pojedynczego turnieju, projekt buduje jeden globalny ranking ELO, który zmienia się po każdym kolejnym przetworzonym pliku z wynikami.

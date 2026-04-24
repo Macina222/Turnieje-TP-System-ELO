@@ -17,13 +17,18 @@ Struktura HTML strony wynikowej (zweryfikowana):
       </table>
   </div>
 
-Wynik: wyniki_par.csv z kolumnami:
+Wynik domyślny: wyniki_par.csv z kolumnami:
   rok, turniej, turniej_id, kategoria, miejsce, para, osrodek, instruktor
+
+Tryb alternatywny:
+  python main.py --organise-data
+  → zapis do rsc/{rok}/{turniej}-{kategoria}.txt
 
 Użycie:
   pip install playwright pandas
   playwright install chromium
-  python scraper_cioff.py [--output PLIK] [--no-headless] [--debug] [--year 2022 2023]
+  python main.py [--output PLIK] [--no-headless] [--debug] [--year 2022 2023]
+  python main.py --organise-data [--year 2022 2023]
 """
 
 import argparse
@@ -32,6 +37,8 @@ import re
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
+import unicodedata
 
 try:
     from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
@@ -46,6 +53,7 @@ except ImportError:
 
 BASE_URL = "https://archiwum-tp.cioff.pl"
 DEFAULT_OUTPUT = "wyniki_par.csv"
+DEFAULT_RSC_DIR = "rsc"
 TIMEOUT = 30_000
 
 
@@ -71,14 +79,36 @@ def clean_tournament_name(raw: str) -> str:
     return raw.strip()
 
 
-def clean_pair(raw: str) -> str:
+def split_pair(raw: str) -> list[str]:
+    return [p.strip() for p in raw.splitlines() if p.strip()]
+
+
+def clean_pair(raw: str, separator: str = "; ") -> str:
     """
-    Dwa nazwiska rozdzielone \\n zamienia na "Nazwisko1 Imię1; Nazwisko2 Imię2".
-    Wejście:  "Klimkiewicz Bartosz\nIwańczak Zofia"
-    Wyjście:  "Klimkiewicz Bartosz; Iwańczak Zofia"
+    Dwa nazwiska rozdzielone \\n scala do jednej linii.
     """
-    parts = [p.strip() for p in raw.splitlines() if p.strip()]
-    return "; ".join(parts)
+    return separator.join(split_pair(raw))
+
+
+def normalize_text_for_filename(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text)
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    ascii_text = ascii_text.lower().strip()
+    ascii_text = re.sub(r"\s+", "_", ascii_text)
+    ascii_text = re.sub(r"[^a-z0-9_]+", "", ascii_text)
+    ascii_text = re.sub(r"_+", "_", ascii_text).strip("_")
+    return ascii_text or "nieznane"
+
+
+def tournament_filename_part(name: str) -> str:
+    clean_name = re.sub(r"\s+\d{4}$", "", name.strip(), flags=re.IGNORECASE)
+    return normalize_text_for_filename(clean_name)
+
+
+def category_filename_part(category: str) -> str:
+    clean_category = re.sub(r"^\s*kategoria\s+", "", category.strip(), flags=re.IGNORECASE)
+    clean_category = clean_category.replace("-", " ")
+    return normalize_text_for_filename(clean_category).replace("_", "")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -335,12 +365,62 @@ def save_csv(records: list, output_path: str):
         log(f"Zapisano {len(records)} wierszy → {output_path}")
 
 
+def save_organized_data(records: list, output_dir: str = DEFAULT_RSC_DIR):
+    if not records:
+        log("Brak danych do zapisania w strukturze rsc.", "WARN")
+        return
+
+    grouped: dict[tuple[str, str, str], list[dict]] = {}
+    for record in records:
+        year = str(record.get("rok", "")).strip()
+        tournament = str(record.get("turniej", "")).strip()
+        category = str(record.get("kategoria", "")).strip()
+        key = (year, tournament, category)
+        grouped.setdefault(key, []).append(record)
+
+    output_root = Path(output_dir)
+    files_written = 0
+
+    for (year, tournament, category), rows in sorted(grouped.items()):
+        year_dir = output_root / year
+        year_dir.mkdir(parents=True, exist_ok=True)
+
+        filename = f"{tournament_filename_part(tournament)}-{category_filename_part(category)}.txt"
+        path = year_dir / filename
+
+        lines = ["Lokata;Para;Ośrodek;Instruktor"]
+        seen_lines = set()
+        for row in rows:
+            para_raw = str(row.get("para", "") or "")
+            if "; " in para_raw and "\n" not in para_raw:
+                para = ", ".join(part.strip() for part in para_raw.split(";") if part.strip())
+            else:
+                para = clean_pair(para_raw, separator=", ")
+
+            lokata = str(row.get("miejsce", "") or "")
+            osrodek = str(row.get("osrodek", "") or "")
+            instruktor = str(row.get("instruktor", "") or "")
+            line = f"{lokata};{para};{osrodek};{instruktor}"
+            if line not in seen_lines:
+                lines.append(line)
+                seen_lines.add(line)
+
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        files_written += 1
+
+    log(f"Zapisano {files_written} plików TXT w strukturze → {output_root}")
+
+
 # ──────────────────────────────────────────────────────────────
 # Główna funkcja
 # ──────────────────────────────────────────────────────────────
 
-def scrape(output=DEFAULT_OUTPUT, headless=True, debug=False, only_years=None):
-    log(f"Start | headless={headless} | debug={debug} | output={output}")
+def scrape(output=DEFAULT_OUTPUT, headless=True, debug=False, only_years=None,
+           organise_data=False, organised_output_dir=DEFAULT_RSC_DIR):
+    log(
+        f"Start | headless={headless} | debug={debug} | output={output} "
+        f"| organise_data={organise_data}"
+    )
     all_records = []
 
     with sync_playwright() as pw:
@@ -375,7 +455,10 @@ def scrape(output=DEFAULT_OUTPUT, headless=True, debug=False, only_years=None):
 
         browser.close()
 
-    save_csv(all_records, output)
+    if organise_data:
+        save_organized_data(all_records, organised_output_dir)
+    else:
+        save_csv(all_records, output)
     return all_records
 
 
@@ -395,6 +478,8 @@ if __name__ == "__main__":
                         help="Zrzuty ekranu dla każdego turnieju")
     parser.add_argument("--year", "-y", nargs="+", metavar="ROK",
                         help="Ogranicz do wybranych lat, np. --year 2022 2023")
+    parser.add_argument("--organise-data", action="store_true",
+                        help="Zapisz dane do folderu rsc/{rok}/turniej-kategoria.txt")
     args = parser.parse_args()
 
     scrape(
@@ -402,4 +487,5 @@ if __name__ == "__main__":
         headless=args.headless,
         debug=args.debug,
         only_years=args.year,
+        organise_data=args.organise_data,
     )
