@@ -1,12 +1,29 @@
 import csv
+from pathlib import Path
+
 import Para
 import Kalkulator
+from app_config import load_ranking_config
 
-def przetworz_turniej(sciezka_do_pliku, baza_danych, wskaznik_k=32):
+
+def przetworz_turniej(
+    sciezka_do_pliku,
+    baza_danych,
+    wskaznik_k=None,
+    wskaznik_d=None,
+    config_path: str | Path | None = None,
+):
     """
     Czyta wyniki turnieju, aktualizuje istniejące pary lub dodaje nowe,
     a następnie przelicza ELO.
     """
+    if wskaznik_k is None or wskaznik_d is None:
+        config = load_ranking_config(config_path)
+        if wskaznik_k is None:
+            wskaznik_k = config.k_factor
+        if wskaznik_d is None:
+            wskaznik_d = config.d_factor
+
     lista_do_kalkulatora = []
 
     # Wczytywanie pliku tekstowego / CSV
@@ -37,7 +54,7 @@ def przetworz_turniej(sciezka_do_pliku, baza_danych, wskaznik_k=32):
             })
 
     # Obliczamy i aktualizujemy słowniki w liście
-    Kalkulator.aktualizacja_rankingu(lista_do_kalkulatora, wskaznik_k)
+    Kalkulator.aktualizacja_rankingu(lista_do_kalkulatora, wskaznik_k, wskaznik_d)
 
     # Przepisujemy wyliczone nowe ELO z powrotem do naszych obiektów w bazie
     for wpis in lista_do_kalkulatora:

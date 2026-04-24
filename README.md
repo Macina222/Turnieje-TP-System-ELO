@@ -72,7 +72,7 @@ Mapowanie działa po prefiksie kategorii z priorytetem dłuższych numerów rzym
 5. Oczekiwany wynik liczony jest klasycznym wzorem ELO:
 
 ```text
-expected = 1 / (1 + 10 ^ ((ranking_b - ranking_a) / 400))
+expected = 1 / (1 + 10 ^ ((ranking_b - ranking_a) / D))
 ```
 
 6. Aktualizacja odbywa się według:
@@ -82,8 +82,18 @@ nowe_elo = stare_elo + suma(actual - expected) * efektywne_k
 efektywne_k = K / (n - 1)
 ```
 
-7. Domyślnie `K = 32`.
-8. Ranking jest budowany sekwencyjnie, rok po roku i plik po pliku w kolejności sortowanej alfabetycznie.
+7. Wskaźniki `K` i `D` są wczytywane z pliku `config.txt` w katalogu projektu.
+8. Domyślna zawartość `config.txt` to `K = 32` oraz `D = 250`.
+9. Ranking jest budowany sekwencyjnie, rok po roku i plik po pliku w kolejności sortowanej alfabetycznie.
+
+### Konfiguracja
+
+Plik `config.txt` w katalogu głównym projektu:
+
+```text
+K=32
+D=250
+```
 
 ## Uruchamianie
 
