@@ -1,7 +1,11 @@
-def oblicz_oczekiwane_elo(ranking_a, ranking_b):
-    return 1 / (1 + 10 ** ((ranking_b - ranking_a) / 400))
+def oblicz_oczekiwane_elo(ranking_a, ranking_b, wskaznik_d):
+    return 1 / (1 + 10 ** ((ranking_b - ranking_a) / wskaznik_d))
 
-def aktualizacja_rankingu(lista_par, wskaznik_k):
+
+def aktualizacja_rankingu(lista_par, wskaznik_k, wskaznik_d):
+    if wskaznik_d == 0:
+        raise ValueError("Wskaznik D nie moze byc rowny 0.")
+
     n = len(lista_par)
     if n < 2:
         return
@@ -12,7 +16,11 @@ def aktualizacja_rankingu(lista_par, wskaznik_k):
             if i == j:
                 continue
 
-            expected = oblicz_oczekiwane_elo(lista_par[i]['elo'], lista_par[j]['elo'])
+            expected = oblicz_oczekiwane_elo(
+                lista_par[i]['elo'],
+                lista_par[j]['elo'],
+                wskaznik_d,
+            )
             place_i = lista_par[i]['place']
             place_j = lista_par[j]['place']
 

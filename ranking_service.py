@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Iterable
 
 from Processer import przetworz_turniej
+from app_config import load_ranking_config
 
 
 BASE_CATEGORY_MATCHERS = (
@@ -135,10 +136,19 @@ def build_ranking(
     category: str,
     years: Iterable[int | str],
     rsc_dir: str | Path = "rsc",
-    k_factor: float = 32,
+    k_factor: float | None = None,
+    d_factor: float | None = None,
+    config_path: str | Path | None = None,
 ) -> RankingBuildResult:
     normalized_category = detect_base_category(category)
     selected_years = normalize_years(years)
+    if k_factor is None or d_factor is None:
+        config = load_ranking_config(config_path)
+        if k_factor is None:
+            k_factor = config.k_factor
+        if d_factor is None:
+            d_factor = config.d_factor
+
     matching_files, included_categories = collect_category_files(
         category=category,
         years=selected_years,
@@ -156,7 +166,13 @@ def build_ranking(
 
     for file_path in matching_files:
         try:
-            przetworz_turniej(str(file_path), baza_par, k_factor)
+            przetworz_turniej(
+                str(file_path),
+                baza_par,
+                k_factor,
+                d_factor,
+                config_path=config_path,
+            )
         except Exception as exc:
             skipped_files.append((str(file_path), str(exc)))
 

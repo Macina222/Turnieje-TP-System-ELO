@@ -1,15 +1,21 @@
 import os
+from pathlib import Path
+
+from app_config import load_ranking_config
 from Processer import przetworz_turniej
 
+project_dir = Path(__file__).resolve().parent
+config = load_ranking_config(project_dir / 'config.txt')
+
 baza_par = {}
-rsc_dir = 'rsc'
+rsc_dir = project_dir / 'rsc'
 
 # Przetwarzanie wszystkich plików w folderze rsc
 for root, dirs, files in os.walk(rsc_dir):
     for file in sorted(files):  # Sortowanie plików, aby zapewnić powtarzalność kolejności przetwarzania
-        sciezka = os.path.join(root, file)
+        sciezka = Path(root) / file
         try:
-            przetworz_turniej(sciezka, baza_par, 32)
+            przetworz_turniej(sciezka, baza_par, config.k_factor, config.d_factor)
         except Exception as e:
             print(f"Błąd podczas przetwarzania pliku {sciezka}: {e}")
 
@@ -17,7 +23,7 @@ for root, dirs, files in os.walk(rsc_dir):
 ranking = sorted(baza_par.values(), key=lambda p: p.elo, reverse=True)
 
 # Zapisywanie rankingu do pliku i wyświetlanie w konsoli
-with open('ranking.txt', 'w', encoding='utf-8') as f:
+with open(project_dir / 'ranking.txt', 'w', encoding='utf-8') as f:
     header = f"{'Miejsce':<8} | {'Para':<50} | {'ELO':<10}"
     separator = "-" * 75
     
