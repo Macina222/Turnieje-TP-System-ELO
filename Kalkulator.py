@@ -3,8 +3,8 @@ def oblicz_oczekiwane_elo(rating_a, rating_b):
 
 def aktualizacja_rankingu(lista_par, wskaznik_k):
     """
-        lista_par: lista słowników w formacie [{'couple': obiekt_Para, 'place': int}]
-        """
+    lista_par: lista słowników w formacie [{'couple': obiekt_Para, 'place': int}]
+    """
     n = len(lista_par)
     if n < 2:
         return
