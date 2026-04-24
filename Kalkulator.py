@@ -1,9 +1,10 @@
-def oblicz_oczekiwane_elo(rating_a, rating_b):
-    return 1 / (1 + 10 ** ((rating_b - rating_a) / 400))
+def oblicz_oczekiwane_elo(ranking_a, ranking_b):
+    return 1 / (1 + 10 ** ((ranking_b - ranking_a) / 400))
 
 def aktualizacja_rankingu(lista_par, wskaznik_k):
     """
-    lista_par: lista słowników w formacie [{'couple': obiekt_Para, 'place': int}]
+    lista_par: lista słowników w formacie [{'id': tuple, 'ranking': float, 'place': int}]
+    Funkcja aktualizuje wartość 'ranking' bezpośrednio w słownikach.
     """
     n = len(lista_par)
     if n < 2:
@@ -16,21 +17,20 @@ def aktualizacja_rankingu(lista_par, wskaznik_k):
             if i == j:
                 continue
 
-            expected = oblicz_oczekiwane_elo(lista_par[i]['couple'].rating, lista_par[j]['couple'].rating)
+            expected = oblicz_oczekiwane_elo(lista_par[i]['ranking'], lista_par[j]['ranking'])
 
             place_i = lista_par[i]['place']
             place_j = lista_par[j]['place']
 
-            # Logika punktacji: mniejsze miejsce = wygrana
             if place_i < place_j:
-                actual = 1.0  # Para 'i' wygrała
+                actual = 1.0
             elif place_i > place_j:
-                actual = 0.0  # Para 'i' przegrała
+                actual = 0.0
             else:
-                actual = 0.5  # Remis (zajęli to samo miejsce)
+                actual = 0.5
 
             zmiany[i] += (actual - expected)
 
     efektywne_k = wskaznik_k / (n-1)
     for i in range(n):
-        lista_par[i]['couple'].rating += zmiany[i] * efektywne_k
+        lista_par[i]['ranking'] += zmiany[i] * efektywne_k
