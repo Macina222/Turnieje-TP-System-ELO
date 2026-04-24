@@ -19,7 +19,7 @@ Kalkulator rankingu ELO dla par tanecznych na podstawie wyników turniejów tań
 
 - `App.py` — aplikacja użytkowa: GUI, tryb terminalowy interaktywny i tryb CLI z argumentami.
 - `ranking_service.py` — scalony backend rankingu: model pary, wczytywanie `config.txt`, przetwarzanie pojedynczych turniejów, obliczanie zmian ELO, budowa rankingu, formatowanie raportu i zapis wyniku.
-- `main.py` — legacy script przetwarzający całe `rsc/` i zapisujący wynik do `ranking.txt`.
+- `main.py` — legacy script przetwarzający całe `rsc/` i wypisujący wynik w konsoli.
 - `rsc/` — dane wejściowe, zorganizowane w podkatalogach roczników.
 - `web-scraper/` — narzędzia do pobierania i organizowania danych z archiwum wyników.
 
@@ -141,7 +141,7 @@ To polecenie:
 
 - przetwarza całe `rsc/`,
 - nie filtruje po latach ani kategoriach,
-- zapisuje wynik do `ranking.txt`.
+- wypisuje wynik w konsoli.
 
 ## Raport wynikowy
 

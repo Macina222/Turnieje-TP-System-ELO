@@ -5,7 +5,6 @@ from ranking_service import (
     format_ranking_table,
     load_ranking_config,
     przetworz_turniej,
-    save_ranking_report,
 )
 
 project_dir = Path(__file__).resolve().parent
@@ -27,6 +26,5 @@ for root, dirs, files in os.walk(rsc_dir):
 ranking = sorted(baza_par.values(), key=lambda p: p.elo, reverse=True)
 report = format_ranking_table(ranking)
 
-# Zapisywanie rankingu do pliku i wyświetlanie w konsoli
+# Wyświetlanie rankingu w konsoli
 print(report)
-save_ranking_report(f"{report}\n", project_dir / 'ranking.txt')
