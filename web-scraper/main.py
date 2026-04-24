@@ -179,38 +179,50 @@ def get_results(page, tournament: dict, debug: bool) -> list:
     # Struktura DOM (zweryfikowana):
     #   <div class="mb-12">
     #       <h3 ...>Kategoria I</h3>
-    #       <table>...</table>
+    #       <div>...<table>...</table></div>
     #   </div>
     #
-    # Dla każdej tabeli szukamy h3 w tym samym kontenerze (closest div).
-    # Jeśli h3 nie ma w bezpośrednim rodzicu, szukamy go w drzewie wyżej.
+    # Sama tabela jest opakowana dodatkowymi <div>, więc `closest('div')`
+    # trafia w wewnętrzny wrapper bez nagłówka. Szukamy więc najpierw
+    # sekcji `.mb-12`, a dopiero później stosujemy fallbacki.
 
     raw_data = page.evaluate("""
         () => {
             const blocks = [];
-            document.querySelectorAll('table').forEach(table => {
-
-                // Znajdź nagłówek kategorii: szukaj h3 w tym samym bloku (div.mb-12)
-                let category = '';
-                const container = table.closest('div');
-                if (container) {
-                    const h3 = container.querySelector('h3');
-                    if (h3) category = h3.innerText.trim();
-                }
-                // Fallback: poprzednie rodzeństwo tabeli
-                if (!category) {
-                    let prev = table.previousElementSibling;
-                    while (prev) {
-                        const t = prev.innerText.trim();
-                        if (t.length > 0 && t.length < 100) { category = t; break; }
-                        prev = prev.previousElementSibling;
+            const getCategoryForTable = (table) => {
+                // Główny przypadek: sekcja wyników ma kontener `.mb-12`
+                // z nagłówkiem h3 stojącym nad tabelą.
+                const section = table.closest('div.mb-12');
+                if (section) {
+                    const heading = section.querySelector('h3');
+                    if (heading && heading.innerText.trim()) {
+                        return heading.innerText.trim();
                     }
                 }
-                // Fallback: caption wewnątrz tabeli
-                if (!category) {
-                    const cap = table.querySelector('caption');
-                    if (cap) category = cap.innerText.trim();
+
+                // Fallback: najbliższy poprzedni nagłówek w drzewie DOM.
+                let node = table;
+                while (node) {
+                    let prev = node.previousElementSibling;
+                    while (prev) {
+                        const heading = prev.matches?.('h1, h2, h3, h4, h5, h6')
+                            ? prev
+                            : prev.querySelector?.('h1, h2, h3, h4, h5, h6');
+                        if (heading && heading.innerText.trim()) {
+                            return heading.innerText.trim();
+                        }
+                        prev = prev.previousElementSibling;
+                    }
+                    node = node.parentElement;
                 }
+
+                // Ostateczny fallback: caption wewnątrz tabeli.
+                const caption = table.querySelector('caption');
+                return caption ? caption.innerText.trim() : '';
+            };
+
+            document.querySelectorAll('table').forEach(table => {
+                const category = getCategoryForTable(table);
 
                 // Nagłówki kolumn
                 const headers = Array.from(
