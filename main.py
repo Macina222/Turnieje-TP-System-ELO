@@ -16,9 +16,18 @@ for root, dirs, files in os.walk(rsc_dir):
 # Tworzenie rankingu
 ranking = sorted(baza_par.values(), key=lambda p: p.elo, reverse=True)
 
-# Drukowanie rankingu w formacie (miejsce, para, elo)
-print(f"{'Miejsce':<8} | {'Para':<50} | {'ELO':<10}")
-print("-" * 75)
-for i, para in enumerate(ranking, 1):
-    nazwa_pary = f"{para.tancerz1}, {para.tancerz2}"
-    print(f"{i:<8} | {nazwa_pary:<50} | {para.elo:<10.2f}")
+# Zapisywanie rankingu do pliku i wyświetlanie w konsoli
+with open('ranking.txt', 'w', encoding='utf-8') as f:
+    header = f"{'Miejsce':<8} | {'Para':<50} | {'ELO':<10}"
+    separator = "-" * 75
+    
+    print(header)
+    print(separator)
+    f.write(header + '\n')
+    f.write(separator + '\n')
+    
+    for i, para in enumerate(ranking, 1):
+        nazwa_pary = f"{para.tancerz1}, {para.tancerz2}"
+        line = f"{i:<8} | {nazwa_pary:<50} | {para.elo:<10.2f}"
+        print(line)
+        f.write(line + '\n')
