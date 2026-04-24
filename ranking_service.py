@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from Processer import przetworz_turniej
-from app_config import load_ranking_config
 
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "config.txt"
+DEFAULT_ELO = 1000.0
 
 BASE_CATEGORY_MATCHERS = (
     ("VIII", "viii"),
@@ -22,13 +23,184 @@ BASE_CATEGORIES = tuple(label for label, _ in BASE_CATEGORY_MATCHERS)
 
 
 @dataclass(frozen=True)
+class RankingConfig:
+    k_factor: float
+    d_factor: float
+
+
+@dataclass
+class Para:
+    tancerz1: str
+    tancerz2: str
+    elo: float = DEFAULT_ELO
+
+    def pobierz_id(self) -> tuple[str, str]:
+        return self.tancerz1, self.tancerz2
+
+    def __str__(self) -> str:
+        return f"Para: {self.tancerz1} i {self.tancerz2} (Ranking: {self.elo})"
+
+
+@dataclass(frozen=True)
 class RankingBuildResult:
     category: str
     years: tuple[int, ...]
-    ranking: tuple[object, ...]
+    ranking: tuple[Para, ...]
     processed_files: tuple[Path, ...]
     included_categories: tuple[str, ...]
     skipped_files: tuple[tuple[str, str], ...]
+
+
+def _parse_config_number(raw_value: str, key: str, line_number: int) -> float:
+    value = raw_value.split("#", 1)[0].strip().replace(",", ".")
+    if not value:
+        raise ValueError(
+            f"Brak wartosci dla {key} w pliku config.txt (linia {line_number})."
+        )
+
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"Nieprawidlowa wartosc dla {key} w pliku config.txt "
+            f"(linia {line_number}): {raw_value.strip()}"
+        ) from exc
+
+
+def load_ranking_config(config_path: str | Path | None = None) -> RankingConfig:
+    path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
+
+    if not path.is_file():
+        raise FileNotFoundError(f"Nie znaleziono pliku konfiguracyjnego: {path}")
+
+    values: dict[str, float] = {}
+
+    for line_number, raw_line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(),
+        start=1,
+    ):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            raise ValueError(
+                f"Nieprawidlowy wpis w pliku config.txt (linia {line_number}): {raw_line}"
+            )
+
+        key, value = line.split("=", 1)
+        normalized_key = key.strip().lower()
+
+        if normalized_key not in {"k", "d"}:
+            continue
+
+        values[normalized_key] = _parse_config_number(
+            value,
+            normalized_key.upper(),
+            line_number,
+        )
+
+    missing = [key.upper() for key in ("k", "d") if key not in values]
+    if missing:
+        raise ValueError(
+            "Brakuje wymaganych wartosci w config.txt: " + ", ".join(missing)
+        )
+
+    if values["k"] < 0:
+        raise ValueError("Wartosc K w config.txt nie moze byc ujemna.")
+    if values["d"] <= 0:
+        raise ValueError("Wartosc D w config.txt musi byc dodatnia.")
+
+    return RankingConfig(k_factor=values["k"], d_factor=values["d"])
+
+
+def oblicz_oczekiwane_elo(ranking_a: float, ranking_b: float, wskaznik_d: float) -> float:
+    return 1 / (1 + 10 ** ((ranking_b - ranking_a) / wskaznik_d))
+
+
+def aktualizacja_rankingu(
+    lista_par: list[dict[str, object]],
+    wskaznik_k: float,
+    wskaznik_d: float,
+) -> None:
+    if wskaznik_d == 0:
+        raise ValueError("Wskaznik D nie moze byc rowny 0.")
+
+    n = len(lista_par)
+    if n < 2:
+        return
+
+    zmiany = [0.0] * n
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+
+            expected = oblicz_oczekiwane_elo(
+                float(lista_par[i]["elo"]),
+                float(lista_par[j]["elo"]),
+                wskaznik_d,
+            )
+            place_i = int(lista_par[i]["place"])
+            place_j = int(lista_par[j]["place"])
+
+            if place_i < place_j:
+                actual = 1.0
+            elif place_i > place_j:
+                actual = 0.0
+            else:
+                actual = 0.5
+
+            zmiany[i] += actual - expected
+
+    efektywne_k = wskaznik_k / (n - 1)
+    for i in range(n):
+        lista_par[i]["elo"] = float(lista_par[i]["elo"]) + zmiany[i] * efektywne_k
+
+
+def przetworz_turniej(
+    sciezka_do_pliku: str | Path,
+    baza_danych: dict[tuple[str, str], Para],
+    wskaznik_k: float | None = None,
+    wskaznik_d: float | None = None,
+    config_path: str | Path | None = None,
+) -> None:
+    if wskaznik_k is None or wskaznik_d is None:
+        config = load_ranking_config(config_path)
+        if wskaznik_k is None:
+            wskaznik_k = config.k_factor
+        if wskaznik_d is None:
+            wskaznik_d = config.d_factor
+
+    lista_do_kalkulatora: list[dict[str, object]] = []
+
+    with open(sciezka_do_pliku, "r", encoding="utf-8") as plik:
+        czytnik = csv.DictReader(plik, delimiter=";")
+
+        for wiersz in czytnik:
+            lokata = int(wiersz["Lokata"])
+            nazwiska = wiersz["Para"].split(", ")
+            if len(nazwiska) != 2:
+                continue
+
+            tancerz1, tancerz2 = nazwiska
+            id_pary = (tancerz1, tancerz2)
+            para = baza_danych.setdefault(id_pary, Para(tancerz1, tancerz2))
+
+            lista_do_kalkulatora.append(
+                {
+                    "id": id_pary,
+                    "elo": para.elo,
+                    "place": lokata,
+                }
+            )
+
+    aktualizacja_rankingu(lista_do_kalkulatora, wskaznik_k, wskaznik_d)
+
+    for wpis in lista_do_kalkulatora:
+        pair_id = wpis["id"]
+        if not isinstance(pair_id, tuple):
+            continue
+        baza_danych[pair_id].elo = float(wpis["elo"])
 
 
 def list_available_years(rsc_dir: str | Path = "rsc") -> list[int]:
@@ -46,7 +218,8 @@ def list_available_years(rsc_dir: str | Path = "rsc") -> list[int]:
 
 
 def list_available_categories_for_years(
-    rsc_dir: str | Path = "rsc", years: Iterable[int | str] | None = None
+    rsc_dir: str | Path = "rsc",
+    years: Iterable[int | str] | None = None,
 ) -> list[str]:
     root = Path(rsc_dir)
     selected_years = normalize_years(years) if years else tuple(list_available_years(root))
@@ -161,13 +334,13 @@ def build_ranking(
             f"Brak plików dla kategorii {normalized_category} w latach: {years_label}."
         )
 
-    baza_par: dict[tuple[str, str], object] = {}
+    baza_par: dict[tuple[str, str], Para] = {}
     skipped_files: list[tuple[str, str]] = []
 
     for file_path in matching_files:
         try:
             przetworz_turniej(
-                str(file_path),
+                file_path,
                 baza_par,
                 k_factor,
                 d_factor,
@@ -188,7 +361,7 @@ def build_ranking(
     )
 
 
-def format_ranking_table(ranking: Iterable[object]) -> str:
+def format_ranking_table(ranking: Iterable[Para]) -> str:
     header = f"{'Miejsce':<8} | {'Para':<50} | {'ELO':<10}"
     separator = "-" * 75
     lines = [header, separator]

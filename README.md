@@ -7,20 +7,18 @@ Kalkulator rankingu ELO dla par tanecznych na podstawie wyników turniejów tań
 - Głównym punktem wejścia jest `App.py`.
 - `App.py` uruchamia GUI w `tkinter`, jeśli moduł jest dostępny.
 - Jeśli `tkinter` nie jest zainstalowany, `App.py` automatycznie przechodzi do trybu terminalowego.
+- Cały backend rankingu został scalony do jednego modułu `ranking_service.py`.
 - Aplikacja pozwala wybrać:
   - kategorię bazową rankingu `I`-`VIII`,
   - jeden lub wiele lat,
   - zapis wyniku do wskazanego pliku.
 - Dla kategorii bazowej zbierane są wszystkie pasujące podkategorie z plików `rsc/`.
-- `main.py` nadal istnieje jako prosty, starszy skrypt liczący jeden globalny ranking ze wszystkich plików `rsc/`.
+- `main.py` nadal istnieje jako prosty, starszy skrypt liczący jeden globalny ranking ze wszystkich plików `rsc/`, ale korzysta już z tego samego backendu co `App.py`.
 
 ## Struktura repozytorium
 
 - `App.py` — aplikacja użytkowa: GUI, tryb terminalowy interaktywny i tryb CLI z argumentami.
-- `ranking_service.py` — logika wyboru plików po latach i kategorii, budowy rankingu, formatowania raportu i zapisu wyniku.
-- `Processer.py` — wczytanie pojedynczego pliku z wynikami i przygotowanie danych do kalkulatora.
-- `Kalkulator.py` — obliczanie zmian ELO.
-- `Para.py` — model pary tanecznej z początkowym rankingiem `1000.0`.
+- `ranking_service.py` — scalony backend rankingu: model pary, wczytywanie `config.txt`, przetwarzanie pojedynczych turniejów, obliczanie zmian ELO, budowa rankingu, formatowanie raportu i zapis wyniku.
 - `main.py` — legacy script przetwarzający całe `rsc/` i zapisujący wynik do `ranking.txt`.
 - `rsc/` — dane wejściowe, zorganizowane w podkatalogach roczników.
 - `web-scraper/` — narzędzia do pobierania i organizowania danych z archiwum wyników.
@@ -85,6 +83,7 @@ efektywne_k = K / (n - 1)
 7. Wskaźniki `K` i `D` są wczytywane z pliku `config.txt` w katalogu projektu.
 8. Domyślna zawartość `config.txt` to `K = 32` oraz `D = 250`.
 9. Ranking jest budowany sekwencyjnie, rok po roku i plik po pliku w kolejności sortowanej alfabetycznie.
+10. `main.py` i `App.py` korzystają z tej samej logiki backendowej, więc liczenie ELO i parsowanie danych pozostaje spójne między trybami uruchomienia.
 
 ### Konfiguracja
 
