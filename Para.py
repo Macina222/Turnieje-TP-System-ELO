@@ -1,5 +1,5 @@
 class Para:
-    def __init__(self, tancerz1, tancerz2, elo = 350.0):
+    def __init__(self, tancerz1, tancerz2, elo = 1000.0):
         self.tancerz1 = tancerz1
         self.tancerz2 = tancerz2
         self.elo = elo
