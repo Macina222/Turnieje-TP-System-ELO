@@ -501,9 +501,12 @@ def main() -> None:
     parser = build_argument_parser()
     args = parser.parse_args()
 
-    cli_requested = args.cli or bool(args.category or args.years or args.output)
+    has_cli_arguments = bool(args.category or args.years or args.output)
 
-    if cli_requested:
+    if args.cli and not has_cli_arguments:
+        raise SystemExit(run_cli_interactive(project_dir))
+
+    if has_cli_arguments:
         raise SystemExit(run_cli_from_args(args, project_dir))
 
     if tk is None:

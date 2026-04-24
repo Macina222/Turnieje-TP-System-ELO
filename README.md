@@ -1,34 +1,33 @@
-# Turnieje TP — Zrewolucjonizowany System Rankingu (bazujący na ELO)
+# Turnieje TP — System rankingu ELO
 
-Prosty kalkulator rankingu ELO dla par tanecznych na podstawie wyników [turniejów tańców polskich PS Cioff](https://turnieje-tp.cioff.pl/). Projekt przetwarza pliki z wynikami zapisane w katalogu `rsc/`, aktualizuje wspólny ranking par i zapisuje końcową tabelę do `ranking.txt`.
+Kalkulator rankingu ELO dla par tanecznych na podstawie wyników turniejów tańców polskich. Projekt pracuje na plikach zapisanych w katalogu `rsc/`, potrafi liczyć ranking dla wybranej rodziny kategorii i wybranych lat, a także pomaga zorganizować dane pobrane z archiwum wyników.
 
-## Autorzy Projektu
+## Aktualny stan projektu
 
-Projekt jest tworzony z pasją przez tancerzy Teatru Tańca UW "Warszawianka":
+- Głównym punktem wejścia jest `App.py`.
+- `App.py` uruchamia GUI w `tkinter`, jeśli moduł jest dostępny.
+- Jeśli `tkinter` nie jest zainstalowany, `App.py` automatycznie przechodzi do trybu terminalowego.
+- Aplikacja pozwala wybrać:
+  - kategorię bazową rankingu `I`-`VIII`,
+  - jeden lub wiele lat,
+  - zapis wyniku do wskazanego pliku.
+- Dla kategorii bazowej zbierane są wszystkie pasujące podkategorie z plików `rsc/`.
+- `main.py` nadal istnieje jako prosty, starszy skrypt liczący jeden globalny ranking ze wszystkich plików `rsc/`.
 
-- **Maciej Zych** — kod, logika kalkulatora
-- **Krzysztof Mrozik** — kod, logiga web-scrapera
-- **Mateusz Zych** — PR, nagłaśnianie projektu, rozmowy z osobami decyzyjnymi
+## Struktura repozytorium
 
-## Cel projektu
+- `App.py` — aplikacja użytkowa: GUI, tryb terminalowy interaktywny i tryb CLI z argumentami.
+- `ranking_service.py` — logika wyboru plików po latach i kategorii, budowy rankingu, formatowania raportu i zapisu wyniku.
+- `Processer.py` — wczytanie pojedynczego pliku z wynikami i przygotowanie danych do kalkulatora.
+- `Kalkulator.py` — obliczanie zmian ELO.
+- `Para.py` — model pary tanecznej z początkowym rankingiem `1000.0`.
+- `main.py` — legacy script przetwarzający całe `rsc/` i zapisujący wynik do `ranking.txt`.
+- `rsc/` — dane wejściowe, zorganizowane w podkatalogach roczników.
+- `web-scraper/` — narzędzia do pobierania i organizowania danych z archiwum wyników.
 
-System ma oszacować siłę pary tanecznej na podstawie zajmowanych lokat. Zamiast przechowywać wyłącznie miejsca z pojedynczego turnieju, projekt buduje jeden globalny ranking ELO, który zmienia się po każdym kolejnym przetworzonym pliku z wynikami.
+## Format danych wejściowych
 
-W praktyce oznacza to, że:
-
-- każda para startuje z tym samym rankingiem początkowym `1000.0`,
-- każda kolejna lista wyników wpływa na aktualny ranking,
-- wyższe miejsce oznacza zwycięstwo nad parami sklasyfikowanymi niżej,
-- remis lokat jest traktowany jak remis w pojedynku,
-- ta sama para ma jeden wspólny ranking we wszystkich przetworzonych plikach.
-
-## Jak działa system
-
-### 1. Dane wejściowe
-
-Silnik rankingu korzysta z plików tekstowych CSV w katalogu `rsc/`. Każdy plik jest traktowany jako jeden zestaw wyników do przeliczenia, zwykle odpowiadający jednej kategorii w konkretnym turnieju.
-
-Oczekiwany format pliku:
+Każdy plik w `rsc/` jest traktowany jako jeden zestaw wyników dla konkretnego turnieju i kategorii. Oczekiwany format:
 
 ```csv
 Lokata;Para;Ośrodek;Instruktor
@@ -36,235 +35,177 @@ Lokata;Para;Ośrodek;Instruktor
 2;Nazwisko3 Imię3, Nazwisko4 Imię4;Nazwa ośrodka;Imię Nazwisko
 ```
 
-W samym obliczaniu rankingu wykorzystywane są tylko pola:
+W obliczeniach wykorzystywane są tylko pola `Lokata` i `Para`.
 
-- `Lokata`
-- `Para`
+Projekt zakłada układ plików:
 
-Kolumny `Ośrodek` i `Instruktor` są obecnie wczytywane z pliku, ale nie wpływają na wynik ELO.
-
-### 2. Budowa bazy par
-
-Podczas przetwarzania projektu każda para jest identyfikowana po krotce:
-
-```python
-(tancerz1, tancerz2)
+```text
+rsc/{rok}/{turniej}-{kategoria}.txt
 ```
-
-Jeżeli para pojawia się po raz pierwszy, otrzymuje ranking początkowy `1000.0`. Jeżeli była już wcześniej przetwarzana, system używa jej bieżącego ELO.
-
-To ważne, bo oznacza również, że spójność zapisu nazwisk ma znaczenie. Nawet drobna różnica w zapisie nazw może zostać potraktowana jako inna para.
-
-### 3. Zamiana turnieju na serię pojedynków
-
-Dla każdego pliku wejściowego system porównuje każdą parę z każdą inną parą z tego samego zestawu wyników.
-
-Zasada jest następująca:
-
-- niższa `Lokata` oznacza wygraną,
-- wyższa `Lokata` oznacza porażkę,
-- taka sama `Lokata` oznacza remis.
 
 Przykład:
 
-- para z miejsca `1` wygrywa z każdą parą z miejsc `2`, `3`, `4` itd.,
-- para z miejsca `5` przegrywa z parami z miejsc `1` do `4`,
-- dwie pary sklasyfikowane ex aequo dostają wynik `0.5` przeciwko sobie.
+```text
+rsc/2025/krakow-vb.txt
+rsc/2025/olsztyn-vs.txt
+rsc/2024/wilanow-iiic.txt
+```
 
-### 4. Obliczenie oczekiwanego wyniku
+## Agregacja kategorii
 
-Dla każdej pary porównań liczony jest klasyczny składnik ELO:
+Aplikacja operuje na kategoriach bazowych `I`, `II`, `III`, `IV`, `V`, `VI`, `VII`, `VIII`.
+
+Każda kategoria bazowa zbiera wszystkie pliki, których końcówka kategorii należy do tej samej rodziny. Przykłady:
+
+- `V` obejmuje między innymi `V`, `VA`, `VB`, `VS`, `VOPEN`, `VAB`.
+- `III` obejmuje między innymi `IIIA`, `IIIB`, `IIIC`, `IIIOPEN`.
+- `IV` obejmuje między innymi `IVA`, `IVB`, `IVOPEN`.
+
+Mapowanie działa po prefiksie kategorii z priorytetem dłuższych numerów rzymskich, więc `VI` nie wpada do `V`, a `VIII` nie wpada do `VII`.
+
+## Jak liczony jest ranking
+
+1. Para jest identyfikowana jako krotka `(tancerz1, tancerz2)`.
+2. Nowa para startuje z ELO `1000.0`.
+3. W obrębie jednego pliku każda para jest porównywana z każdą inną parą.
+4. Niższa lokata oznacza zwycięstwo, wyższa porażkę, taka sama lokata remis.
+5. Oczekiwany wynik liczony jest klasycznym wzorem ELO:
 
 ```text
 expected = 1 / (1 + 10 ^ ((ranking_b - ranking_a) / 400))
 ```
 
-Im wyższy ranking przeciwnika, tym większy zysk za zwycięstwo i mniejsza strata za porażkę.
-
-### 5. Aktualizacja ELO
-
-Po zsumowaniu wszystkich wirtualnych pojedynków z danego pliku system aktualizuje ranking według wzoru:
+6. Aktualizacja odbywa się według:
 
 ```text
 nowe_elo = stare_elo + suma(actual - expected) * efektywne_k
-```
-
-Domyślny współczynnik `K` wynosi `32`, ale w kodzie jest dodatkowo dzielony przez liczbę przeciwników w danym pliku:
-
-```text
 efektywne_k = K / (n - 1)
 ```
 
-Dzięki temu łączna zmiana rankingu dla jednej kategorii nie rośnie liniowo wraz z liczbą uczestników.
+7. Domyślnie `K = 32`.
+8. Ranking jest budowany sekwencyjnie, rok po roku i plik po pliku w kolejności sortowanej alfabetycznie.
 
-### 6. Ranking końcowy
+## Uruchamianie
 
-Po przetworzeniu wszystkich plików z katalogu `rsc/` pary są sortowane malejąco po `ELO`, a wynik trafia do pliku `ranking.txt` i jednocześnie jest wypisywany w konsoli.
+### 1. Zalecany sposób: `App.py`
 
-## Przepływ programu
-
-1. `main.py` przechodzi po katalogu `rsc/`.
-2. Każdy plik przekazuje do `Processer.przetworz_turniej(...)`.
-3. `Processer.py` odczytuje lokaty i mapuje wpisy na obiekty par.
-4. `Kalkulator.py` przelicza zmianę rankingu dla wszystkich par z danego pliku.
-5. Zaktualizowane ELO wraca do wspólnej bazy par.
-6. Po przetworzeniu wszystkich plików tworzony jest `ranking.txt`.
-
-## Moduły i ich odpowiedzialność
-
-### `main.py`
-
-Punkt wejścia aplikacji.
-
-Odpowiada za:
-
-- utworzenie wspólnej bazy par `baza_par`,
-- przejście po wszystkich plikach w katalogu `rsc/`,
-- wywołanie przetwarzania dla każdego pliku,
-- zbudowanie końcowego rankingu,
-- zapis wyniku do `ranking.txt`.
-
-To tutaj ustawiony jest również domyślny współczynnik `K=32` przekazywany do przeliczeń.
-
-### `Processer.py`
-
-Warstwa importu danych turniejowych.
-
-Odpowiada za:
-
-- odczyt pliku CSV z separatorem `;`,
-- pobranie lokaty i nazwy pary z każdego wiersza,
-- rozdzielenie pola `Para` na dwóch tancerzy,
-- utworzenie nowych obiektów `Para`, jeśli para jeszcze nie istnieje,
-- zbudowanie listy danych wejściowych dla kalkulatora ELO,
-- przepisanie nowo obliczonego ELO z powrotem do bazy.
-
-To ten moduł decyduje, jak dane z pliku są zamieniane na obiekty domenowe używane przez silnik rankingu.
-
-### `Kalkulator.py`
-
-Silnik obliczeniowy rankingu.
-
-Odpowiada za:
-
-- obliczenie oczekiwanego wyniku pary względem innej pary,
-- porównanie każdej pary z każdą inną parą w obrębie jednego pliku wyników,
-- obsługę zwycięstw, porażek i remisów lokat,
-- przeliczenie zmiany ELO na podstawie sumy wszystkich porównań.
-
-To najważniejszy moduł z punktu widzenia logiki systemu.
-
-### `Para.py`
-
-Minimalny model danych reprezentujący parę taneczną.
-
-Przechowuje:
-
-- `tancerz1`,
-- `tancerz2`,
-- `elo`.
-
-Moduł zawiera też pomocnicze metody do pobrania identyfikatora i tekstowej reprezentacji pary.
-
-### `rsc/`
-
-Katalog z danymi wejściowymi dla kalkulatora.
-
-Znajdują się tu ręcznie przygotowane lub wyselekcjonowane pliki wyników, które są bezpośrednio przetwarzane przez `main.py`. Obecna implementacja zakłada, że to właśnie zawartość tego katalogu definiuje zakres liczonego rankingu.
-
-### `ranking.txt`
-
-Plik wyjściowy generowany po uruchomieniu programu. Zawiera końcową tabelę z miejscem, nazwą pary i obliczonym ELO.
-
-## Katalog `web-scraper/`
-
-W repozytorium znajduje się też osobna część pomocnicza do pobierania danych z archiwum wyników.
-
-### `web-scraper/main.py`
-
-Scraper oparty o Playwright, który pobiera dane z `https://archiwum-tp.cioff.pl`.
-
-Odpowiada za:
-
-- pobranie listy sezonów,
-- pobranie listy turniejów dla danego roku,
-- wejście na stronę turnieju,
-- odczyt tabel wyników dla wszystkich kategorii,
-- normalizację nazw kolumn,
-- zapis całości do pliku CSV.
-
-Wynikiem jest plik `web-scraper/wyniki_par.csv` o szerszej strukturze niż dane w `rsc/`.
-
-### `web-scraper/diagnoza.py`
-
-Narzędzie diagnostyczne do analizy struktury HTML strony z wynikami. Służy do sprawdzania selektorów i struktury DOM, gdy scraper wymaga poprawki.
-
-### `web-scraper/wyniki_par.csv`
-
-Przykładowy wynik działania scrapera. Zawiera pełniejsze dane niż kalkulator ELO potrzebuje bezpośrednio.
-
-### `web-scraper/wyniki_par_struktura.json`
-
-Plik pomocniczy z zapisanym stanem lub diagnozą struktury strony. Może być używany przy debugowaniu scrapera.
-
-## Ważna uwaga o danych
-
-Scraper i kalkulator nie są obecnie spięte w jeden automatyczny pipeline.
-
-To znaczy:
-
-- `web-scraper/main.py` zapisuje szeroki plik CSV z kolumnami typu `rok`, `turniej`, `kategoria`, `miejsce`, `para`,
-- `main.py` oczekuje uproszczonych plików w katalogu `rsc/` z nagłówkami `Lokata;Para;Ośrodek;Instruktor`,
-- przed użyciem danych ze scrapera w kalkulatorze potrzebne jest ich dopasowanie do formatu wejściowego silnika rankingu.
-
-Dodatkowo scraper zapisuje pole `para` w formacie z separatorem `;`, natomiast `Processer.py` oczekuje zapisu:
-
-```text
-Nazwisko1 Imię1, Nazwisko2 Imię2
-```
-
-## Uruchomienie
-
-### Obliczenie rankingu
+Jeżeli `tkinter` jest dostępny:
 
 ```bash
-python main.py
+python3 App.py
 ```
 
-Po uruchomieniu:
+Uruchomi się okno z wyborem lat i kategorii.
 
-- ranking pojawi się w konsoli,
-- ten sam wynik zostanie zapisany do `ranking.txt`.
+Jeżeli `tkinter` nie jest dostępny:
 
-### Uruchomienie scrapera
+```bash
+python3 App.py
+```
 
-Wymagane biblioteki:
+Uruchomi się tryb terminalowy z pytaniami o lata, kategorię i zapis wyniku.
+
+### 2. Tryb CLI z argumentami
+
+```bash
+python3 App.py --category V --years 2025
+python3 App.py --category III --years 2022 2023 2024
+python3 App.py --category IV --years 2021-2025 --output ranking_iv_2021_2025.txt
+python3 App.py --cli
+```
+
+Zasady:
+
+- `--category` przyjmuje kategorię bazową, np. `V` albo `III`.
+- `--years` przyjmuje pojedyncze lata i zakresy, np. `2024 2025` albo `2021-2025`.
+- jeśli w trybie argumentowym nie podasz `--years`, zostaną użyte wszystkie dostępne lata z `rsc/`.
+- `--output` zapisuje raport do pliku.
+- `--cli` wymusza tryb terminalowy nawet wtedy, gdy `tkinter` jest dostępny.
+
+### 3. Legacy script
+
+```bash
+python3 main.py
+```
+
+To polecenie:
+
+- przetwarza całe `rsc/`,
+- nie filtruje po latach ani kategoriach,
+- zapisuje wynik do `ranking.txt`.
+
+## Raport wynikowy
+
+Raport generowany przez `App.py` zawiera:
+
+- kategorię bazową,
+- listę wybranych lat,
+- liczbę przetworzonych plików,
+- listę uwzględnionych podkategorii,
+- tabelę rankingu,
+- listę pominiętych plików, jeśli podczas wczytywania pojawił się błąd.
+
+Domyślna nazwa pliku wyjściowego ma postać zbliżoną do:
+
+```text
+ranking_v_2025.txt
+ranking_iii_2022_2023_2024.txt
+```
+
+## `tkinter`
+
+GUI wymaga modułu `tkinter`.
+
+Jeśli go nie masz, możesz:
+
+- korzystać z trybu terminalowego w `App.py`, albo
+- doinstalować `tkinter` dla systemowego Pythona.
+
+Przykładowo:
+
+- Fedora / RHEL:
+
+```bash
+sudo dnf install python3-tkinter
+```
+
+- Debian / Ubuntu:
+
+```bash
+sudo apt install python3-tk
+```
+
+## Web scraper
+
+W katalogu `web-scraper/` znajduje się scraper dla `https://archiwum-tp.cioff.pl`.
+
+Instalacja zależności:
 
 ```bash
 pip install playwright pandas
 playwright install chromium
 ```
 
-Przykład użycia:
+Przykładowe użycie:
 
 ```bash
-python web-scraper/main.py --year 2025 --output web-scraper/wyniki_par.csv
+python3 web-scraper/main.py --year 2025 --output web-scraper/wyniki_par.csv
+python3 web-scraper/main.py --organise-data --year 2025
 ```
 
-## Założenia i ograniczenia obecnej wersji
+Tryb `--organise-data` zapisuje dane bezpośrednio do struktury `rsc/{rok}/{turniej}-{kategoria}.txt`, czyli do formatu używanego przez kalkulator rankingu.
 
-- ranking jest liczony sekwencyjnie w kolejności przetwarzania plików,
-- każda para ma jedno globalne ELO, niezależnie od kategorii,
-- system nie rozróżnia rangi turnieju ani jego ważności,
-- brak dodatkowej walidacji literówek i wariantów nazw par,
-- wynik zależy wyłącznie od lokat, bez uwzględniania punktów sędziowskich,
-- dane wejściowe muszą być poprawnie przygotowane przed uruchomieniem programu.
+## Ograniczenia obecnej wersji
 
-## Podsumowanie
+- identyfikacja par zależy od dokładnego zapisu nazwisk i imion,
+- ta sama para ma jedno ELO w ramach aktualnie liczonego zestawu plików,
+- system nie waży turniejów według rangi,
+- liczą się wyłącznie lokaty, bez punktów sędziowskich,
+- kolejność przetwarzania plików wpływa na końcowy ranking,
+- błędne lub niespójne pliki mogą zostać pominięte.
 
-Projekt składa się z dwóch części:
+## Autorzy projektu
 
-- rdzenia obliczeniowego ELO (`main.py`, `Processer.py`, `Kalkulator.py`, `Para.py`),
-- narzędzi do pozyskiwania i diagnozowania danych (`web-scraper/`).
-
-Rdzeń liczy ranking na podstawie już przygotowanych plików w `rsc/`, a scraper pomaga zebrać dane źródłowe z archiwum wyników. Dzięki temu repozytorium pozwala zarówno budować dane wejściowe, jak i przeliczać z nich końcowy ranking par.
+- Maciej Zych — kod, logika kalkulatora
+- Krzysztof Mrozik — kod, logika web-scrapera
+- Mateusz Zych — PR, nagłaśnianie projektu, rozmowy z osobami decyzyjnymi
