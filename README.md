@@ -1,6 +1,6 @@
-# Turnieje TP System ELO
+# Turnieje TP — Zrewolucjonizowany System Rankingu (bazujący na ELO)
 
-Prosty kalkulator rankingu ELO dla par tanecznych na podstawie wyników turniejów Tańców Polskich. Projekt przetwarza pliki z wynikami zapisane w katalogu `rsc/`, aktualizuje wspólny ranking par i zapisuje końcową tabelę do `ranking.txt`.
+Prosty kalkulator rankingu ELO dla par tanecznych na podstawie wyników [turniejów tańców polskich](https://turnieje-tp.cioff.pl/). Projekt przetwarza pliki z wynikami zapisane w katalogu `rsc/`, aktualizuje wspólny ranking par i zapisuje końcową tabelę do `ranking.txt`.
 
 ## Cel projektu
 
