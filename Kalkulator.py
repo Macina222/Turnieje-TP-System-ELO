@@ -1,5 +1,5 @@
 def oblicz_oczekiwane_elo(ranking_a, ranking_b):
-    return 1 / (1 + 10 ** ((ranking_b - ranking_a) / 800))
+    return 1 / (1 + 10 ** ((ranking_b - ranking_a) / 400))
 
 def aktualizacja_rankingu(lista_par, wskaznik_k):
     n = len(lista_par)
