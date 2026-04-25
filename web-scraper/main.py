@@ -1,34 +1,18 @@
 """
-Scraper wyników par tanecznych z https://archiwum-tp.cioff.pl/
+Scraper zasilający kalkulator rankingu danymi z archiwum wyników.
 
-Struktura strony:
-  /              → kafelki z latami
-  /2022/         → kafelki z turniejami
-  /2022/malbork-id-143  → wyniki par w kategoriach
+Rola modułu w całym systemie:
+1. wchodzi na stronę główną archiwum i pobiera listę lat,
+2. dla każdego roku odczytuje listę turniejów,
+3. dla każdego turnieju pobiera wszystkie tabele kategorii i ich wiersze,
+4. normalizuje kolumny oraz zapis par do wspólnego formatu,
+5. zapisuje wynik jako CSV albo bezpośrednio do struktury `rsc/`,
+6. dzięki temu backend z `ranking_service.py` dostaje dane wejściowe w formacie,
+   który może przeliczać na ranking ELO bez dodatkowych transformacji.
 
-Struktura HTML strony wynikowej (zweryfikowana):
-  <div class="mb-12">
-      <h3 class="text-2xl ...">Kategoria I</h3>
-      <table>
-          <thead><tr><th>Lokata</th><th>Para</th><th>Ośrodek</th><th>Instruktor</th></tr></thead>
-          <tbody>
-              <tr><td>1</td><td>Kowalski Jan\nNowak Anna</td><td>ZTP X</td><td>NOWAK JAN</td></tr>
-          </tbody>
-      </table>
-  </div>
-
-Wynik domyślny: wyniki_par.csv z kolumnami:
-  rok, turniej, turniej_id, kategoria, miejsce, para, osrodek, instruktor
-
-Tryb alternatywny:
-  python main.py --organise-data
-  → zapis do rsc/{rok}/{turniej}-{kategoria}.txt
-
-Użycie:
-  pip install playwright pandas
-  playwright install chromium
-  python main.py [--output PLIK] [--no-headless] [--debug] [--year 2022 2023]
-  python main.py --organise-data [--year 2022 2023]
+Domyślny wynik to `wyniki_par.csv` z kolumnami:
+`rok`, `turniej`, `turniej_id`, `kategoria`, `miejsce`, `para`, `osrodek`,
+`instruktor`.
 """
 
 import argparse
@@ -58,6 +42,8 @@ TIMEOUT = 30_000
 
 
 def log(msg: str, level: str = "INFO"):
+    """Wypisuje komunikat diagnostyczny z poziomem logowania i godziną."""
+
     ts = datetime.now().strftime("%H:%M:%S")
     print(f"[{ts}] [{level}] {msg}", flush=True)
 
@@ -68,9 +54,11 @@ def log(msg: str, level: str = "INFO"):
 
 def clean_tournament_name(raw: str) -> str:
     """
-    Z kafelka turnieju bierze tylko pierwszą niepustą linię.
-    Wejście:  "KATOWICE 2025\n\n2025-11-21\nKatowice\n\nPrzejdź do wyników turnieju"
-    Wyjście:  "KATOWICE 2025"
+    Czyści nazwę turnieju pobraną z kafelka na stronie.
+
+    Kafelek zawiera zwykle kilka linii: nazwę, datę, miasto i tekst linku.
+    Scraper bierze tylko pierwszą niepustą linię, bo to ona stanowi stabilną
+    nazwę turnieju używaną później w CSV i nazwach plików.
     """
     for line in raw.splitlines():
         line = line.strip()
@@ -80,17 +68,24 @@ def clean_tournament_name(raw: str) -> str:
 
 
 def split_pair(raw: str) -> list[str]:
+    """Rozbija zapis pary z wielu linii HTML na listę pojedynczych osób."""
+
     return [p.strip() for p in raw.splitlines() if p.strip()]
 
 
 def clean_pair(raw: str, separator: str = "; ") -> str:
     """
-    Dwa nazwiska rozdzielone \\n scala do jednej linii.
+    Scala wieloliniowy zapis pary do jednej linii.
+
+    To ważne, bo w tabelach HTML partner i partnerka często stoją w osobnych
+    liniach komórki, a backend rankingu oczekuje jednego pola tekstowego.
     """
     return separator.join(split_pair(raw))
 
 
 def normalize_text_for_filename(text: str) -> str:
+    """Normalizuje tekst do bezpiecznej, ASCII-owej postaci nazwy pliku."""
+
     normalized = unicodedata.normalize("NFKD", text)
     ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
     ascii_text = ascii_text.lower().strip()
@@ -101,11 +96,15 @@ def normalize_text_for_filename(text: str) -> str:
 
 
 def tournament_filename_part(name: str) -> str:
+    """Buduje fragment nazwy pliku reprezentujący nazwę turnieju."""
+
     clean_name = re.sub(r"\s+\d{4}$", "", name.strip(), flags=re.IGNORECASE)
     return normalize_text_for_filename(clean_name)
 
 
 def category_filename_part(category: str) -> str:
+    """Buduje fragment nazwy pliku reprezentujący kategorię turniejową."""
+
     clean_category = re.sub(r"^\s*kategoria\s+", "", category.strip(), flags=re.IGNORECASE)
     clean_category = clean_category.replace("-", " ")
     return normalize_text_for_filename(clean_category).replace("_", "")
@@ -116,6 +115,12 @@ def category_filename_part(category: str) -> str:
 # ──────────────────────────────────────────────────────────────
 
 def get_years(page) -> list:
+    """
+    Pobiera dostępne lata ze strony głównej archiwum.
+
+    To pierwszy krok scrapera, od którego zaczyna się iteracja po całym serwisie.
+    """
+
     log("Pobieram listę lat...")
     page.goto(BASE_URL, wait_until="networkidle", timeout=TIMEOUT)
     page.wait_for_timeout(2000)
@@ -144,6 +149,13 @@ def get_years(page) -> list:
 # ──────────────────────────────────────────────────────────────
 
 def get_tournaments(page, year: str) -> list:
+    """
+    Pobiera wszystkie turnieje widoczne dla wskazanego roku.
+
+    Dla każdego linku wyciąga nazwę, identyfikator i pełny URL, z których potem
+    korzysta etap pobierania tabel wynikowych.
+    """
+
     url = f"{BASE_URL}/{year}/"
     log(f"  [{year}] Pobieram turnieje: {url}")
     page.goto(url, wait_until="networkidle", timeout=TIMEOUT)
@@ -189,6 +201,17 @@ def get_tournaments(page, year: str) -> list:
 # ──────────────────────────────────────────────────────────────
 
 def get_results(page, tournament: dict, debug: bool) -> list:
+    """
+    Pobiera i normalizuje wszystkie wyniki z pojedynczego turnieju.
+
+    Funkcja:
+    1. otwiera stronę turnieju,
+    2. znajduje wszystkie tabele wyników,
+    3. przypisuje każdej tabeli kategorię,
+    4. normalizuje nazwy kolumn,
+    5. scala dane w listę rekordów gotowych do zapisu.
+    """
+
     url = tournament["url"]
     log(f"    [{tournament['year']}] {tournament['name']} (id={tournament['id']})")
 
@@ -309,7 +332,7 @@ def get_results(page, tournament: dict, debug: bool) -> list:
 
 
 def _normalize_col(name: str) -> str:
-    """Mapuje nagłówki kolumn z polskiego na ustandaryzowane klucze."""
+    """Mapuje różne nagłówki tabel na wspólne klucze używane w eksporcie."""
     n = name.lower().strip()
     if re.match(r"^(lp\.?|nr\.?|#|lokata|miejsce|place|poz\.?|rank)$", n):
         return "miejsce"
@@ -332,6 +355,13 @@ PREFERRED_COLS = ["rok", "turniej", "turniej_id", "kategoria", "miejsce", "para"
 
 
 def save_csv(records: list, output_path: str):
+    """
+    Zapisuje zebrane rekordy do jednego pliku CSV.
+
+    Jeśli dostępny jest `pandas`, funkcja dodatkowo usuwa duplikaty i porządkuje
+    kolumny według preferowanej kolejności.
+    """
+
     if not records:
         log("Brak danych do zapisania.", "WARN")
         return
@@ -366,6 +396,14 @@ def save_csv(records: list, output_path: str):
 
 
 def save_organized_data(records: list, output_dir: str = DEFAULT_RSC_DIR):
+    """
+    Zapisuje rekordy bezpośrednio do struktury wymaganej przez kalkulator.
+
+    To najważniejszy tryb integracyjny między scraperem a rankingiem:
+    rekordy są grupowane do plików `rsc/{rok}/{turniej}-{kategoria}.txt`, dzięki
+    czemu `ranking_service.py` może je od razu przeliczyć.
+    """
+
     if not records:
         log("Brak danych do zapisania w strukturze rsc.", "WARN")
         return
@@ -417,6 +455,14 @@ def save_organized_data(records: list, output_dir: str = DEFAULT_RSC_DIR):
 
 def scrape(output=DEFAULT_OUTPUT, headless=True, debug=False, only_years=None,
            organise_data=False, organised_output_dir=DEFAULT_RSC_DIR):
+    """
+    Wykonuje pełny przebieg scrapera od wejścia na stronę do zapisu danych.
+
+    To główna funkcja modułu. Zarządza przeglądarką, iteruje po latach i
+    turniejach, zbiera rekordy i na końcu przekazuje je do odpowiedniego
+    mechanizmu zapisu.
+    """
+
     log(
         f"Start | headless={headless} | debug={debug} | output={output} "
         f"| organise_data={organise_data}"
@@ -462,11 +508,9 @@ def scrape(output=DEFAULT_OUTPUT, headless=True, debug=False, only_years=None,
     return all_records
 
 
-# ──────────────────────────────────────────────────────────────
-# CLI
-# ──────────────────────────────────────────────────────────────
+def build_argument_parser() -> argparse.ArgumentParser:
+    """Buduje parser argumentów dla trybu uruchomienia z terminala."""
 
-if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Scraper wyników par tanecznych z archiwum-tp.cioff.pl"
     )
@@ -480,6 +524,13 @@ if __name__ == "__main__":
                         help="Ogranicz do wybranych lat, np. --year 2022 2023")
     parser.add_argument("--organise-data", action="store_true",
                         help="Zapisz dane do folderu rsc/{rok}/turniej-kategoria.txt")
+    return parser
+
+
+def main() -> None:
+    """Uruchamia scraper w trybie CLI z argumentami użytkownika."""
+
+    parser = build_argument_parser()
     args = parser.parse_args()
 
     scrape(
@@ -489,3 +540,7 @@ if __name__ == "__main__":
         only_years=args.year,
         organise_data=args.organise_data,
     )
+
+
+if __name__ == "__main__":
+    main()

@@ -1,3 +1,20 @@
+"""
+Backend rankingu ELO dla par tańców polskich.
+
+Przepływ systemu w tym module wygląda następująco:
+1. `load_ranking_config` odczytuje parametry K i D z `config.txt`.
+2. `collect_category_files` wybiera pliki `rsc/{rok}/{turniej}-{kategoria}.txt`
+   pasujące do wybranych lat i rodziny kategorii.
+3. `przetworz_turniej` wczytuje jeden plik z wynikami i mapuje każdy wiersz
+   na parę z bieżącym rankingiem ELO.
+4. `aktualizacja_rankingu` porównuje każdą parę z każdą inną w obrębie jednego
+   turnieju, liczy oczekiwane wyniki i aktualizuje ranking po całej tabeli.
+5. `build_ranking` powtarza ten proces dla wszystkich dopasowanych plików w
+   stałej kolejności, budując wspólną bazę par i ranking końcowy.
+6. Funkcje formatujące zamieniają wynik obliczeń na raport tekstowy, z którego
+   korzystają GUI, CLI i skrypty pomocnicze.
+"""
+
 from __future__ import annotations
 
 import csv
@@ -24,17 +41,34 @@ BASE_CATEGORIES = tuple(label for label, _ in BASE_CATEGORY_MATCHERS)
 
 @dataclass(frozen=True)
 class RankingConfig:
+    """Przenosi parametry ELO odczytane z konfiguracji projektu."""
+
     k_factor: float
     d_factor: float
 
 
 @dataclass
 class Para:
+    """
+    Reprezentuje jedną parę taneczną w trakcie budowania rankingu.
+
+    Obiekt przechowuje znormalizowane nazwy tancerzy oraz bieżące ELO, które
+    jest aktualizowane po przetworzeniu kolejnych turniejów.
+    """
+
     tancerz1: str
     tancerz2: str
     elo: float = DEFAULT_ELO
 
+    def __post_init__(self) -> None:
+        """Normalizuje zapis nazw od razu po utworzeniu obiektu."""
+
+        self.tancerz1 = normalize_dancer_name(self.tancerz1)
+        self.tancerz2 = normalize_dancer_name(self.tancerz2)
+
     def pobierz_id(self) -> tuple[str, str]:
+        """Zwraca stabilny identyfikator pary używany jako klucz słownika."""
+
         return self.tancerz1, self.tancerz2
 
     def __str__(self) -> str:
@@ -43,6 +77,13 @@ class Para:
 
 @dataclass(frozen=True)
 class RankingBuildResult:
+    """
+    Zbiera pełny rezultat pojedynczego przebiegu budowy rankingu.
+
+    Ten obiekt trafia bezpośrednio do warstwy prezentacji, więc zawiera zarówno
+    ranking końcowy, jak i metadane potrzebne do zbudowania raportu.
+    """
+
     category: str
     years: tuple[int, ...]
     ranking: tuple[Para, ...]
@@ -51,7 +92,30 @@ class RankingBuildResult:
     skipped_files: tuple[tuple[str, str], ...]
 
 
+def normalize_dancer_name(raw_name: str) -> str:
+    """Usuwa zbędne spacje i końcowe kropki z nazwy tancerza."""
+
+    return raw_name.strip().rstrip(".").strip()
+
+
+def parse_pair_names(raw_pair: str) -> tuple[str, str] | None:
+    """
+    Rozbija pole `Para` na dokładnie dwa nazwiska zapisane po przecinku.
+
+    Zwraca `None`, jeśli rekord nie daje się jednoznacznie zinterpretować jako
+    jedna para taneczna.
+    """
+
+    names = [normalize_dancer_name(name) for name in raw_pair.split(",")]
+    if len(names) != 2 or any(not name for name in names):
+        return None
+
+    return names[0], names[1]
+
+
 def _parse_config_number(raw_value: str, key: str, line_number: int) -> float:
+    """Parsuje pojedynczą wartość liczbową z `config.txt` wraz z walidacją."""
+
     value = raw_value.split("#", 1)[0].strip().replace(",", ".")
     if not value:
         raise ValueError(
@@ -68,6 +132,16 @@ def _parse_config_number(raw_value: str, key: str, line_number: int) -> float:
 
 
 def load_ranking_config(config_path: str | Path | None = None) -> RankingConfig:
+    """
+    Wczytuje parametry ELO z pliku konfiguracyjnego projektu.
+
+    Funkcja jest pierwszym krokiem obliczeń. Odpowiada za:
+    1. znalezienie właściwego pliku `config.txt`,
+    2. odczyt kluczy `K` i `D`,
+    3. walidację zakresu obu wartości,
+    4. zwrócenie gotowego obiektu `RankingConfig`.
+    """
+
     path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
 
     if not path.is_file():
@@ -114,6 +188,8 @@ def load_ranking_config(config_path: str | Path | None = None) -> RankingConfig:
 
 
 def oblicz_oczekiwane_elo(ranking_a: float, ranking_b: float, wskaznik_d: float) -> float:
+    """Liczy oczekiwany wynik pary A przeciwko parze B według wzoru ELO."""
+
     return 1 / (1 + 10 ** ((ranking_b - ranking_a) / wskaznik_d))
 
 
@@ -122,6 +198,18 @@ def aktualizacja_rankingu(
     wskaznik_k: float,
     wskaznik_d: float,
 ) -> None:
+    """
+    Aktualizuje ELO wszystkich par biorących udział w jednym turnieju.
+
+    Algorytm działa krok po kroku:
+    1. dla każdej pary przechodzi po wszystkich pozostałych parach,
+    2. wyznacza wynik oczekiwany na podstawie aktualnego ELO,
+    3. zamienia lokaty na wynik rzeczywisty: wygrana, porażka albo remis,
+    4. sumuje różnice `actual - expected`,
+    5. skaluje zmianę przez efektywne `K`, aby cały turniej dawał jedną
+       zbiorczą korektę rankingu.
+    """
+
     if wskaznik_d == 0:
         raise ValueError("Wskaznik D nie moze byc rowny 0.")
 
@@ -164,6 +252,18 @@ def przetworz_turniej(
     wskaznik_d: float | None = None,
     config_path: str | Path | None = None,
 ) -> None:
+    """
+    Przetwarza jeden plik z wynikami i zapisuje zmiany w wspólnej bazie par.
+
+    Funkcja realizuje pełny cykl dla pojedynczego turnieju:
+    1. dobiera parametry ELO z konfiguracji lub argumentów,
+    2. czyta wiersze pliku `Lokata;Para;...`,
+    3. identyfikuje pary i tworzy brakujące obiekty `Para`,
+    4. buduje listę wejściową dla kalkulatora ELO,
+    5. wywołuje `aktualizacja_rankingu`,
+    6. przepisuje nowe ELO z listy roboczej z powrotem do `baza_danych`.
+    """
+
     if wskaznik_k is None or wskaznik_d is None:
         config = load_ranking_config(config_path)
         if wskaznik_k is None:
@@ -178,11 +278,11 @@ def przetworz_turniej(
 
         for wiersz in czytnik:
             lokata = int(wiersz["Lokata"])
-            nazwiska = wiersz["Para"].split(", ")
-            if len(nazwiska) != 2:
+            para_nazwy = parse_pair_names(wiersz["Para"])
+            if para_nazwy is None:
                 continue
 
-            tancerz1, tancerz2 = nazwiska
+            tancerz1, tancerz2 = para_nazwy
             id_pary = (tancerz1, tancerz2)
             para = baza_danych.setdefault(id_pary, Para(tancerz1, tancerz2))
 
@@ -204,6 +304,8 @@ def przetworz_turniej(
 
 
 def list_available_years(rsc_dir: str | Path = "rsc") -> list[int]:
+    """Zwraca posortowaną listę lat dostępnych jako katalogi w `rsc/`."""
+
     root = Path(rsc_dir)
     years: list[int] = []
 
@@ -221,6 +323,13 @@ def list_available_categories_for_years(
     rsc_dir: str | Path = "rsc",
     years: Iterable[int | str] | None = None,
 ) -> list[str]:
+    """
+    Wykrywa bazowe kategorie dostępne dla wskazanych lat.
+
+    Funkcja skanuje pliki wynikowe, wyciąga kategorię z nazwy pliku i mapuje ją
+    na rodzinę bazową `I`-`VIII`, którą można później pokazać w GUI i CLI.
+    """
+
     root = Path(rsc_dir)
     selected_years = normalize_years(years) if years else tuple(list_available_years(root))
     found_categories: set[str] = set()
@@ -240,6 +349,8 @@ def list_available_categories_for_years(
 
 
 def normalize_years(years: Iterable[int | str] | None) -> tuple[int, ...]:
+    """Normalizuje listę lat do unikalnej, posortowanej krotki liczb całkowitych."""
+
     if years is None:
         return tuple()
 
@@ -252,6 +363,13 @@ def normalize_years(years: Iterable[int | str] | None) -> tuple[int, ...]:
 
 
 def detect_base_category(category_slug: str | None) -> str | None:
+    """
+    Mapuje wariant kategorii z nazwy pliku na kategorię bazową.
+
+    Dzięki kolejności prefiksów `VIII` -> `I` kategorie o dłuższym numerze
+    rzymskim nie wpadają omyłkowo do krótszych rodzin, np. `VIII` do `VII`.
+    """
+
     if not category_slug:
         return None
 
@@ -264,6 +382,8 @@ def detect_base_category(category_slug: str | None) -> str | None:
 
 
 def extract_category_slug(file_path: str | Path) -> str | None:
+    """Wyciąga końcówkę kategorii z nazwy pliku `turniej-kategoria.txt`."""
+
     path = Path(file_path)
     if "-" not in path.stem:
         return None
@@ -276,6 +396,14 @@ def collect_category_files(
     years: Iterable[int | str],
     rsc_dir: str | Path = "rsc",
 ) -> tuple[list[Path], list[str]]:
+    """
+    Zbiera wszystkie pliki wynikowe należące do wybranej rodziny kategorii.
+
+    To etap filtrowania danych wejściowych przed liczeniem ELO. Funkcja zwraca:
+    - listę faktycznych plików do przetworzenia,
+    - listę dokładnych podkategorii, które weszły do raportu.
+    """
+
     root = Path(rsc_dir)
     normalized_category = detect_base_category(category)
     selected_years = normalize_years(years)
@@ -313,6 +441,18 @@ def build_ranking(
     d_factor: float | None = None,
     config_path: str | Path | None = None,
 ) -> RankingBuildResult:
+    """
+    Buduje pełny ranking dla wybranej kategorii i zestawu lat.
+
+    Jest to główna funkcja backendu:
+    1. normalizuje filtry wejściowe,
+    2. dobiera konfigurację ELO,
+    3. zbiera pasujące pliki z `rsc/`,
+    4. przetwarza każdy turniej w kolejności sortowania nazw plików,
+    5. zapisuje błędy plików pominiętych,
+    6. sortuje pary malejąco po ELO i pakuje wynik do `RankingBuildResult`.
+    """
+
     normalized_category = detect_base_category(category)
     selected_years = normalize_years(years)
     if k_factor is None or d_factor is None:
@@ -362,6 +502,8 @@ def build_ranking(
 
 
 def format_ranking_table(ranking: Iterable[Para]) -> str:
+    """Formatuje samą tabelę rankingową do postaci tekstowej."""
+
     header = f"{'Miejsce':<8} | {'Para':<50} | {'ELO':<10}"
     separator = "-" * 75
     lines = [header, separator]
@@ -379,6 +521,13 @@ def format_ranking_table(ranking: Iterable[Para]) -> str:
 
 
 def format_ranking_report(result: RankingBuildResult) -> str:
+    """
+    Buduje pełny raport tekstowy na podstawie wyniku obliczeń.
+
+    Raport zawiera filtry wejściowe, liczbę przetworzonych plików, listę
+    podkategorii, tabelę rankingową i ewentualne pliki pominięte z błędami.
+    """
+
     lines = [
         f"Kategoria bazowa: {result.category}",
         f"Lata: {', '.join(str(year) for year in result.years)}",
@@ -399,6 +548,8 @@ def format_ranking_report(result: RankingBuildResult) -> str:
 
 
 def build_default_output_filename(result: RankingBuildResult) -> str:
+    """Tworzy domyślną nazwę pliku raportu z kategorii i zakresu lat."""
+
     if len(result.years) == 1:
         years_part = str(result.years[0])
     elif len(result.years) <= 4:
@@ -410,6 +561,8 @@ def build_default_output_filename(result: RankingBuildResult) -> str:
 
 
 def save_ranking_report(report_text: str, output_path: str | Path) -> Path:
+    """Zapisuje gotowy raport tekstowy do wskazanego pliku."""
+
     path = Path(output_path)
     path.write_text(report_text, encoding="utf-8")
     return path
