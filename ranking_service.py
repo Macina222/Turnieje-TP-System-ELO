@@ -382,7 +382,7 @@ def detect_base_category(category_slug: str | None) -> str | None:
 
 
 def extract_category_slug(file_path: str | Path) -> str | None:
-    """Wyciąga końcówkę kategorii z nazwy pliku `turniej-kategoria.txt`."""
+    """Wyciąga końcówkę kategorii z nazwy pliku po ostatnim myślniku."""
 
     path = Path(file_path)
     if "-" not in path.stem:

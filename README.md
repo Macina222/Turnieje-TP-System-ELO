@@ -38,15 +38,15 @@ W obliczeniach wykorzystywane są tylko pola `Lokata` i `Para`.
 Projekt zakłada układ plików:
 
 ```text
-rsc/{rok}/{turniej}-{kategoria}.txt
+rsc/{rok}/{dd-mm-turniej}-{kategoria}.txt
 ```
 
 Przykład:
 
 ```text
-rsc/2025/krakow-vb.txt
-rsc/2025/olsztyn-vs.txt
-rsc/2024/wilanow-iiic.txt
+rsc/2025/05-11-dobczyce-i.txt
+rsc/2025/12-04-krakow-vb.txt
+rsc/2024/19-10-wilanow-iiic.txt
 ```
 
 ## Agregacja kategorii
@@ -202,7 +202,7 @@ python3 web-scraper/main.py --year 2025 --output web-scraper/wyniki_par.csv
 python3 web-scraper/main.py --organise-data --year 2025
 ```
 
-Tryb `--organise-data` zapisuje dane bezpośrednio do struktury `rsc/{rok}/{turniej}-{kategoria}.txt`, czyli do formatu używanego przez kalkulator rankingu.
+Tryb `--organise-data` zapisuje dane bezpośrednio do struktury `rsc/{rok}/{dd-mm-turniej}-{kategoria}.txt`, czyli do formatu używanego przez kalkulator rankingu.
 
 ## Ograniczenia obecnej wersji
 
