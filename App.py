@@ -1,3 +1,14 @@
+"""
+Punkt wejścia aplikacji rankingu ELO.
+
+Ten moduł spina warstwę użytkownika z backendem obliczeniowym:
+1. odczytuje dostępne lata i kategorie z katalogu `rsc/`,
+2. pozwala wybrać filtry w GUI albo CLI,
+3. przekazuje wybór do `ranking_service.build_ranking`,
+4. odbiera gotowy raport i pokazuje go w oknie lub konsoli,
+5. opcjonalnie zapisuje raport do pliku tekstowego.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -23,6 +34,13 @@ except ModuleNotFoundError:
 
 
 def parse_years_text(value: str, available_years: list[int]) -> list[int]:
+    """
+    Zamienia tekst wpisany przez użytkownika na listę poprawnych lat.
+
+    Obsługuje pojedyncze lata, listy rozdzielone przecinkami oraz zakresy typu
+    `2021-2025`. Dodatkowo akceptuje skróty oznaczające wybór wszystkich lat.
+    """
+
     text = value.strip()
     if not text:
         raise ValueError("Nie podano lat.")
@@ -61,12 +79,16 @@ def parse_years_text(value: str, available_years: list[int]) -> list[int]:
 
 
 def parse_year_arguments(values: list[str] | None, available_years: list[int]) -> list[int]:
+    """Parsuje lata przekazane przez argument `--years`."""
+
     if not values:
         return list(available_years)
     return parse_years_text(",".join(values), available_years)
 
 
 def prompt_until_valid(prompt: str, parser) -> object:
+    """Powtarza pytanie w CLI, dopóki parser nie zaakceptuje wartości."""
+
     while True:
         raw_value = input(prompt).strip()
         try:
@@ -76,6 +98,8 @@ def prompt_until_valid(prompt: str, parser) -> object:
 
 
 def prompt_for_years(available_years: list[int]) -> list[int]:
+    """Wyświetla użytkownikowi listę lat i zwraca poprawny wybór CLI."""
+
     print("Dostępne lata:")
     print(", ".join(str(year) for year in available_years))
     print("Wpisz np. 2024,2025 albo 2021-2025 albo all")
@@ -86,11 +110,15 @@ def prompt_for_years(available_years: list[int]) -> list[int]:
 
 
 def prompt_for_category(categories: list[str]) -> str:
+    """Pozwala wybrać kategorię przez numer pozycji albo symbol kategorii."""
+
     print("Dostępne kategorie:")
     for index, category in enumerate(categories, start=1):
         print(f"{index}. {category}")
 
     def parse_category(value: str) -> str:
+        """Waliduje pojedynczą odpowiedź użytkownika dotyczącą kategorii."""
+
         text = value.strip().upper()
         if not text:
             raise ValueError("Nie podano kategorii.")
@@ -107,6 +135,8 @@ def prompt_for_category(categories: list[str]) -> str:
 
 
 def prompt_yes_no(prompt: str, default: bool = True) -> bool:
+    """Obsługuje pytanie typu tak/nie z domyślną odpowiedzią."""
+
     suffix = "[T/n]" if default else "[t/N]"
     answer = input(f"{prompt} {suffix}: ").strip().lower()
     if not answer:
@@ -115,6 +145,17 @@ def prompt_yes_no(prompt: str, default: bool = True) -> bool:
 
 
 def run_cli_interactive(project_dir: Path) -> int:
+    """
+    Uruchamia interaktywny tryb terminalowy.
+
+    Przepływ jest prosty:
+    1. wykryj dostępne lata,
+    2. poproś o wybór lat i kategorii,
+    3. wylicz ranking,
+    4. pokaż raport,
+    5. opcjonalnie zapisz wynik do pliku.
+    """
+
     rsc_dir = project_dir / "rsc"
     available_years = list_available_years(rsc_dir)
 
@@ -150,6 +191,13 @@ def run_cli_interactive(project_dir: Path) -> int:
 
 
 def run_cli_from_args(args: argparse.Namespace, project_dir: Path) -> int:
+    """
+    Obsługuje nieinteraktywny tryb CLI uruchamiany przez argumenty.
+
+    Ten wariant zakłada, że użytkownik podał kategorię, a lata są przekazywane
+    przez `--years` albo domyślnie obejmują cały dostępny zakres.
+    """
+
     rsc_dir = project_dir / "rsc"
     available_years = list_available_years(rsc_dir)
 
@@ -175,6 +223,8 @@ def run_cli_from_args(args: argparse.Namespace, project_dir: Path) -> int:
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
+    """Buduje parser argumentów współdzielony przez GUI i tryb terminalowy."""
+
     parser = argparse.ArgumentParser(
         description="Kalkulator rankingu ELO dla plików rsc."
     )
@@ -201,7 +251,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
 if tk is not None:
     class RankingApp(tk.Tk):
+        """
+        Okno GUI do liczenia rankingu bez pracy w terminalu.
+
+        Klasa utrzymuje aktualny stan filtrów, deleguje obliczenia do backendu
+        i pokazuje raport tekstowy wraz ze statusem ostatniej operacji.
+        """
+
         def __init__(self) -> None:
+            """Inicjalizuje okno, dane wejściowe i bazowy stan interfejsu."""
+
             super().__init__()
 
             self.title("Kalkulator rankingu ELO")
@@ -235,6 +294,8 @@ if tk is not None:
                 self.status_var.set("Nie znaleziono katalogów z latami w folderze rsc.")
 
         def _build_ui(self) -> None:
+            """Buduje layout okna: filtry po lewej, raport i status po prawej."""
+
             try:
                 ttk.Style(self).theme_use("clam")
             except tk.TclError:
@@ -376,36 +437,55 @@ if tk is not None:
             self.result_text.configure(xscrollcommand=x_scroll.set)
 
         def _get_selected_years(self) -> list[int]:
+            """Odczytuje zaznaczone lata z listy w GUI."""
+
             return [
                 int(self.years_listbox.get(index))
                 for index in self.years_listbox.curselection()
             ]
 
         def _set_result_text(self, content: str) -> None:
+            """Podmienia zawartość pola tekstowego z raportem."""
+
             self.result_text.configure(state="normal")
             self.result_text.delete("1.0", tk.END)
             self.result_text.insert("1.0", content)
             self.result_text.configure(state="disabled")
 
         def _select_all_years(self) -> None:
+            """Zaznacza wszystkie dostępne lata i odświeża stan filtrów."""
+
             if self.available_years:
                 self.years_listbox.selection_set(0, tk.END)
             self._refresh_category_choices()
             self._mark_result_stale()
 
         def _clear_years_selection(self) -> None:
+            """Czyści zaznaczenie lat i oznacza raport jako nieaktualny."""
+
             self.years_listbox.selection_clear(0, tk.END)
             self._refresh_category_choices()
             self._mark_result_stale()
 
         def _on_year_selection_change(self, _event: tk.Event | None = None) -> None:
+            """Reaguje na zmianę lat przez odświeżenie listy kategorii."""
+
             self._refresh_category_choices()
             self._mark_result_stale()
 
         def _on_filter_changed(self, _event: tk.Event | None = None) -> None:
+            """Oznacza poprzedni wynik jako nieaktualny po zmianie filtra."""
+
             self._mark_result_stale()
 
         def _refresh_category_choices(self) -> None:
+            """
+            Odświeża listę kategorii dostępnych dla aktualnie wybranych lat.
+
+            Dzięki temu użytkownik może wybrać tylko te rodziny kategorii,
+            dla których faktycznie istnieją pliki wejściowe.
+            """
+
             years = self._get_selected_years()
             categories = list_available_categories_for_years(
                 self.rsc_dir, years if years else None
@@ -422,6 +502,8 @@ if tk is not None:
                 self.category_var.set("")
 
         def _mark_result_stale(self) -> None:
+            """Resetuje wynik po zmianie filtrów i blokuje zapis starego raportu."""
+
             self.current_result = None
             self.current_report = ""
             self.save_button.state(["disabled"])
@@ -429,6 +511,13 @@ if tk is not None:
             self.status_var.set("Filtry zostały zmienione. Kliknij \"Oblicz ranking\".")
 
         def _calculate_ranking(self) -> None:
+            """
+            Uruchamia pełny backend rankingu dla aktualnie ustawionych filtrów.
+
+            Metoda waliduje wybór w GUI, wywołuje `build_ranking`, a potem
+            aktualizuje podsumowanie, status i treść raportu w oknie.
+            """
+
             category = self.category_var.get().strip()
             years = self._get_selected_years()
 
@@ -468,6 +557,8 @@ if tk is not None:
             self.save_button.state(["!disabled"])
 
         def _save_ranking(self) -> None:
+            """Zapisuje ostatnio obliczony raport do pliku wybranego w GUI."""
+
             if not self.current_result or not self.current_report:
                 messagebox.showerror(
                     "Brak rankingu",
@@ -497,6 +588,16 @@ if tk is not None:
 
 
 def main() -> None:
+    """
+    Wybiera tryb uruchomienia aplikacji.
+
+    Kolejność decyzji jest następująca:
+    1. jeśli podano argumenty obliczeń, uruchom tryb CLI z argumentów,
+    2. jeśli wymuszono `--cli`, uruchom tryb interaktywny w terminalu,
+    3. jeśli `tkinter` nie jest dostępny, przejdź do CLI,
+    4. w przeciwnym razie uruchom GUI.
+    """
+
     project_dir = Path(__file__).resolve().parent
     parser = build_argument_parser()
     args = parser.parse_args()
