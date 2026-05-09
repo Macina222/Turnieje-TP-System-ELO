@@ -10,9 +10,10 @@ Rola modułu w całym systemie:
 6. dzięki temu backend z `ranking_service.py` dostaje dane wejściowe w formacie,
    który może przeliczać na ranking ELO bez dodatkowych transformacji.
 
-Domyślny wynik to `wyniki_par.csv` z kolumnami:
-`rok`, `turniej`, `turniej_id`, `kategoria`, `miejsce`, `para`, `osrodek`,
-`instruktor`.
+Domyślny wynik to `wyniki_par.csv` z preferowanymi kolumnami:
+`rok`, `turniej`, `turniej_id`, `data_turnieju`, `kategoria`, `miejsce`,
+`para`, `osrodek`, `instruktor`, `punkty`. Jeśli strona zawiera dodatkowe
+kolumny, zostają dopisane na końcu eksportu.
 """
 
 import argparse
