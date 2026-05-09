@@ -1,7 +1,7 @@
 """
 Legacy punkt wejścia budujący jeden globalny ranking z całego `rsc/`.
 
-Ten skrypt nie filtruje danych po latach ani kategoriach. Działa krok po kroku:
+Ten skrypt nie filtruje danych po latach, kategoriach ani klasach. Działa krok po kroku:
 1. wczytuje parametry K i D z `config.txt`,
 2. przechodzi po wszystkich plikach wynikowych w `rsc/`,
 3. dla każdego pliku wywołuje `przetworz_turniej`,
@@ -9,7 +9,9 @@ Ten skrypt nie filtruje danych po latach ani kategoriach. Działa krok po kroku:
 5. wypisuje tabelę rankingu w konsoli.
 
 Jest to prostsza, historyczna ścieżka uruchomienia. Nowszy interfejs użytkownika
-znajduje się w `App.py`, ale oba warianty korzystają z tego samego backendu.
+znajduje się w `App.py`. Ten plik korzysta z funkcji przetwarzania turnieju
+z backendu, ale nie przekazuje filtrów ani klas z nazw plików, więc każda nowa
+para startuje od bazowego ELO w jednej wspólnej puli rankingu.
 """
 
 import os

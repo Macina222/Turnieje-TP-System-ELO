@@ -11,17 +11,21 @@ Kalkulator rankingu ELO dla par tanecznych na podstawie wyników turniejów tań
 - Aplikacja pozwala wybrać:
   - kategorię bazową rankingu `I`-`VIII`,
   - jeden lub wiele lat,
+  - opcjonalnie jedną lub wiele klas/podkategorii, np. `B`, `A`, `S`, `OPEN`,
   - zapis wyniku do wskazanego pliku.
-- Dla kategorii bazowej zbierane są wszystkie pasujące podkategorie z plików `rsc/`.
-- `main.py` nadal istnieje jako prosty, starszy skrypt liczący jeden globalny ranking ze wszystkich plików `rsc/`, ale korzysta już z tego samego backendu co `App.py`.
+- Dla kategorii bazowej zbierane są wszystkie pasujące podkategorie z plików `rsc/`, a filtr klas może zawęzić ten zestaw.
+- `main.py` nadal istnieje jako prosty, starszy skrypt liczący jeden globalny ranking ze wszystkich plików `rsc/`. Korzysta z funkcji backendu, ale nie obsługuje filtrów lat, kategorii ani klas.
 
 ## Struktura repozytorium
 
-- `App.py` — aplikacja użytkowa: GUI, tryb terminalowy interaktywny i tryb CLI z argumentami.
-- `ranking_service.py` — scalony backend rankingu: model pary, wczytywanie `config.txt`, przetwarzanie pojedynczych turniejów, obliczanie zmian ELO, budowa rankingu, formatowanie raportu i zapis wyniku.
+- `App.py` — aplikacja użytkowa: GUI, interaktywny tryb terminalowy i tryb CLI z argumentami.
+- `ranking_service.py` — scalony backend rankingu: model pary, wczytywanie `config.txt`, przetwarzanie pojedynczych turniejów, obliczanie zmian ELO, filtrowanie lat/kategorii/klas, budowa rankingu, formatowanie raportu i zapis wyniku.
 - `main.py` — legacy script przetwarzający całe `rsc/` i wypisujący wynik w konsoli.
+- `config.txt` — parametry algorytmu ELO: `K`, `D` oraz domyślne ELO dla klas.
 - `rsc/` — dane wejściowe, zorganizowane w podkatalogach roczników.
-- `web-scraper/` — narzędzia do pobierania i organizowania danych z archiwum wyników.
+- `web-scraper/main.py` — scraper archiwum wyników; zapisuje dane do CSV albo bezpośrednio do `rsc/`.
+- `web-scraper/diagnoza.py` — skrypt pomocniczy do sprawdzania struktury HTML strony archiwum.
+- `web-scraper/wyniki_par.csv`, `web-scraper/wyniki_par_struktura.json`, `web-scraper/diagnoza_dom.html` — przykładowe lub diagnostyczne artefakty pracy scrapera.
 
 ## Format danych wejściowych
 
@@ -61,10 +65,18 @@ Każda kategoria bazowa zbiera wszystkie pliki, których końcówka kategorii na
 
 Mapowanie działa po prefiksie kategorii z priorytetem dłuższych numerów rzymskich, więc `VI` nie wpada do `V`, a `VIII` nie wpada do `VII`.
 
+Klasa jest wyciągana z sufiksu po kategorii bazowej:
+
+- `VB` oznacza kategorię bazową `V` i klasę `B`.
+- `VOPEN` oznacza kategorię bazową `V` i klasę `OPEN`.
+- `V` oznacza kategorię bazową `V` bez sufiksu klasy.
+
+GUI i CLI pozwalają ograniczyć ranking do wybranych klas. Brak wyboru klas oznacza wszystkie klasy dostępne dla wskazanej kategorii i lat.
+
 ## Jak liczony jest ranking
 
 1. Para jest identyfikowana jako krotka `(tancerz1, tancerz2)`.
-2. Nowa para startuje z ELO `1000.0`.
+2. Nowa para startuje z domyślnym ELO dla klasy odczytanej z nazwy pliku, np. `defaulteloB` dla klasy `B`.
 3. W obrębie jednego pliku każda para jest porównywana z każdą inną parą.
 4. Niższa lokata oznacza zwycięstwo, wyższa porażkę, taka sama lokata remis.
 5. Oczekiwany wynik liczony jest klasycznym wzorem ELO:
@@ -80,18 +92,22 @@ nowe_elo = stare_elo + suma(actual - expected) * efektywne_k
 efektywne_k = K / (n - 1)
 ```
 
-7. Wskaźniki `K` i `D` są wczytywane z pliku `config.txt` w katalogu projektu.
-8. Domyślna zawartość `config.txt` to `K = 32` oraz `D = 250`.
-9. Ranking jest budowany sekwencyjnie, rok po roku i plik po pliku w kolejności sortowanej alfabetycznie.
-10. `main.py` i `App.py` korzystają z tej samej logiki backendowej, więc liczenie ELO i parsowanie danych pozostaje spójne między trybami uruchomienia.
+7. Wskaźniki `K`, `D` i domyślne ELO klas są wczytywane z pliku `config.txt` w katalogu projektu.
+8. Aktualna zawartość `config.txt` ustawia `K = 50`, `D = 250`, `C = 1000`, `B = 1100`, `A = 1200`, `S = 1300`.
+9. W `App.py` ranking jest budowany sekwencyjnie: lata rosnąco, a w obrębie roku pliki według daty z nazwy `{dd}-{mm}-...`.
+10. `main.py` korzysta z tej samej funkcji przetwarzania turnieju, ale jako legacy script nie przekazuje klas z nazw plików i traktuje wszystkie dane jako jeden globalny ranking.
 
 ### Konfiguracja
 
 Plik `config.txt` w katalogu głównym projektu:
 
 ```text
-K=32
+K=50
 D=250
+defaulteloC=1000
+defaulteloB=1100
+defaulteloA=1200
+defaulteloS=1300
 ```
 
 ## Uruchamianie
@@ -104,7 +120,7 @@ Jeżeli `tkinter` jest dostępny:
 python3 App.py
 ```
 
-Uruchomi się okno z wyborem lat i kategorii.
+Uruchomi się okno z wyborem lat, kategorii i klas.
 
 Jeżeli `tkinter` nie jest dostępny:
 
@@ -112,12 +128,13 @@ Jeżeli `tkinter` nie jest dostępny:
 python3 App.py
 ```
 
-Uruchomi się tryb terminalowy z pytaniami o lata, kategorię i zapis wyniku.
+Uruchomi się tryb terminalowy z pytaniami o lata, kategorię, klasy i zapis wyniku.
 
 ### 2. Tryb CLI z argumentami
 
 ```bash
 python3 App.py --category V --years 2025
+python3 App.py --category V --classes B A --years 2025
 python3 App.py --category III --years 2022 2023 2024
 python3 App.py --category IV --years 2021-2025 --output ranking_iv_2021_2025.txt
 python3 App.py --cli
@@ -128,6 +145,7 @@ Zasady:
 - `--category` przyjmuje kategorię bazową, np. `V` albo `III`.
 - `--years` przyjmuje pojedyncze lata i zakresy, np. `2024 2025` albo `2021-2025`.
 - jeśli w trybie argumentowym nie podasz `--years`, zostaną użyte wszystkie dostępne lata z `rsc/`.
+- `--classes` przyjmuje klasy do uwzględnienia, np. `B A`, `S OPEN` albo numery pozycji z listy klas; brak argumentu oznacza wszystkie klasy.
 - `--output` zapisuje raport do pliku.
 - `--cli` wymusza tryb terminalowy nawet wtedy, gdy `tkinter` jest dostępny.
 
@@ -140,7 +158,7 @@ python3 main.py
 To polecenie:
 
 - przetwarza całe `rsc/`,
-- nie filtruje po latach ani kategoriach,
+- nie filtruje po latach, kategoriach ani klasach,
 - wypisuje wynik w konsoli.
 
 ## Raport wynikowy
@@ -148,6 +166,7 @@ To polecenie:
 Raport generowany przez `App.py` zawiera:
 
 - kategorię bazową,
+- klasy uwzględnione w przebiegu,
 - listę wybranych lat,
 - liczbę przetworzonych plików,
 - listę uwzględnionych podkategorii,
@@ -157,8 +176,8 @@ Raport generowany przez `App.py` zawiera:
 Domyślna nazwa pliku wyjściowego ma postać zbliżoną do:
 
 ```text
-ranking_v_2025.txt
-ranking_iii_2022_2023_2024.txt
+ranking_v_B_A_2025.txt
+ranking_iii_S_OPEN_A_B_C_2022_2023_2024.txt
 ```
 
 ## `tkinter`
