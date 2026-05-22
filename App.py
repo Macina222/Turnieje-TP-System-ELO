@@ -3,7 +3,7 @@ Punkt wejścia aplikacji rankingu ELO.
 
 Ten moduł spina warstwę użytkownika z backendem obliczeniowym:
 
-1. Odczytuje dostępne lata i kategorie z katalogu `rsc/`.
+1. Odczytuje dostępne lata, kategorie i klasy z katalogu `rsc/`.
 2. Pozwala wybrać filtry (kategorię, klasy, lata) w GUI albo CLI.
 3. Przekazuje wybór do `ranking_service.build_ranking`.
 4. Odbiera gotowy raport i pokazuje go w oknie lub konsoli.
