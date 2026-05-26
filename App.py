@@ -18,6 +18,7 @@ from pathlib import Path
 from ranking_service import (
     build_default_output_filename,
     build_ranking,
+    format_classes_for_display,
     format_ranking_report,
     list_available_categories_for_years,
     list_available_classes_for_category_and_years,
@@ -707,9 +708,7 @@ if tk is not None:
 
             report = format_ranking_report(result)
             included_categories = ", ".join(result.included_categories) or "brak"
-            classes_label = (
-                ", ".join(result.included_classes) if result.included_classes else "wszystkie"
-            )
+            classes_label = format_classes_for_display(result.included_classes)
 
             self.current_result = result
             self.current_report = report
