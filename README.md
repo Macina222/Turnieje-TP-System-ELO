@@ -13,6 +13,8 @@ Kalkulator rankingu ELO dla par tanecznych na podstawie wyników turniejów tań
   - jeden lub wiele lat,
   - opcjonalnie jedną lub wiele klas/podkategorii, np. `B`, `A`, `S`, `OPEN`,
   - zapis wyniku do wskazanego pliku.
+- Osobny skrypt `progress_export.py` zapisuje do CSV historię zmian punktów par
+  po każdym turnieju: punkty przed, punkty po, różnicę i lokatę.
 - Dla kategorii bazowej zbierane są wszystkie pasujące podkategorie z plików `rsc/`, a filtr klas może zawęzić ten zestaw.
 - `main.py` nadal istnieje jako prosty, starszy skrypt liczący jeden globalny ranking ze wszystkich plików `rsc/`. Korzysta z funkcji backendu, ale nie obsługuje filtrów lat, kategorii ani klas.
 
@@ -20,6 +22,7 @@ Kalkulator rankingu ELO dla par tanecznych na podstawie wyników turniejów tań
 
 - `App.py` — aplikacja użytkowa: GUI, interaktywny tryb terminalowy i tryb CLI z argumentami.
 - `ranking_service.py` — scalony backend rankingu: model pary, wczytywanie `config.txt`, przetwarzanie pojedynczych turniejów, obliczanie zmian ELO, filtrowanie lat/kategorii/klas, budowa rankingu, formatowanie raportu i zapis wyniku.
+- `progress_export.py` — eksport CSV pokazujący postęp par turniej po turnieju.
 - `main.py` — legacy script przetwarzający całe `rsc/` i wypisujący wynik w konsoli.
 - `config.txt` — parametry algorytmu ELO: `K`, `D` oraz domyślne ELO dla klas.
 - `rsc/` — dane wejściowe, zorganizowane w podkatalogach roczników.
@@ -160,6 +163,24 @@ To polecenie:
 - przetwarza całe `rsc/`,
 - nie filtruje po latach, kategoriach ani klasach,
 - wypisuje wynik w konsoli.
+
+### 4. Eksport postępu par do CSV
+
+```bash
+python3 progress_export.py --category V --years 2025
+python3 progress_export.py --category V --classes B A --years 2024-2025
+python3 progress_export.py --category III --years 2022 2023 2024 --output progress_iii.csv
+python3 progress_export.py
+```
+
+Bez argumentów skrypt pyta w terminalu o lata, kategorię, opcjonalnie klasy
+i ścieżkę zapisu. Plik CSV ma domyślnie separator średnika i zawiera m.in.:
+
+- rok, datę turnieju, nazwę turnieju i plik źródłowy,
+- kategorię bazową, podkategorię i klasę,
+- lokatę pary na turnieju,
+- nazwiska tancerzy,
+- `punkty_przed`, `punkty_po` i `roznica_punktow`.
 
 ## Raport wynikowy
 
