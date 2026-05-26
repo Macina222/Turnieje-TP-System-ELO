@@ -4,3 +4,4 @@ defaulteloC=1000
 defaulteloB=1100
 defaulteloA=1200
 defaulteloS=1300
+defaulteloOPEN=1100

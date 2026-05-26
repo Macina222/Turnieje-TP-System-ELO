@@ -334,6 +334,7 @@ def load_ranking_config(config_path: str | Path | None = None) -> RankingConfig:
       defaulteloB=<liczba> — domyślne ELO dla klasy B
       defaulteloA=<liczba> — domyślne ELO dla klasy A
       defaulteloS=<liczba> — domyślne ELO dla klasy S
+      defaulteloOPEN=<liczba> — domyślne ELO dla OPEN i pozostałych klas
     """
     path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
     if not path.is_file():
@@ -384,14 +385,15 @@ def get_default_elo_for_class(klasa: str, class_default_elos: dict[str, float]) 
     """
     Zwraca domyślne ELO dla danej klasy.
 
-    Jeśli klasa nie jest skonfigurowana (np. "AB", ""), zwraca najniższe
-    z dostępnych domyślnych ELO — zgodnie z założeniem, że nieznana klasa
-    traktowana jest jako najniższa.
+    Klasy S, A, B i C mogą mieć własne wartości w config.txt. OPEN oraz
+    pozostałe sufiksy klas, np. "AB", "DEBIUT" albo brak sufiksu, korzystają
+    z `defaulteloOPEN`. Gdy stary config nie ma tej wartości, używana jest
+    stała DEFAULT_ELO.
     """
     if klasa in class_default_elos:
         return class_default_elos[klasa]
-    if class_default_elos:
-        return min(class_default_elos.values())
+    if "OPEN" in class_default_elos:
+        return class_default_elos["OPEN"]
     return DEFAULT_ELO
 
 
