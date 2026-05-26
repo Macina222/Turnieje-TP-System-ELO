@@ -79,7 +79,7 @@ GUI i CLI pozwalają ograniczyć ranking do wybranych klas. Brak wyboru klas ozn
 ## Jak liczony jest ranking
 
 1. Para jest identyfikowana jako krotka `(tancerz1, tancerz2)`.
-2. Nowa para startuje z domyślnym ELO dla klasy odczytanej z nazwy pliku, np. `defaulteloB` dla klasy `B`.
+2. Nowa para startuje z domyślnym ELO dla klasy odczytanej z nazwy pliku, np. `defaulteloB` dla klasy `B`; pary z `OPEN` oraz klas innych niż `S`, `A`, `B`, `C` korzystają z `defaulteloOPEN`.
 3. W obrębie jednego pliku każda para jest porównywana z każdą inną parą.
 4. Niższa lokata oznacza zwycięstwo, wyższa porażkę, taka sama lokata remis.
 5. Oczekiwany wynik liczony jest klasycznym wzorem ELO:
@@ -96,7 +96,7 @@ efektywne_k = K / (n - 1)
 ```
 
 7. Wskaźniki `K`, `D` i domyślne ELO klas są wczytywane z pliku `config.txt` w katalogu projektu.
-8. Aktualna zawartość `config.txt` ustawia `K = 50`, `D = 250`, `C = 1000`, `B = 1100`, `A = 1200`, `S = 1300`.
+8. Aktualna zawartość `config.txt` ustawia `K = 50`, `D = 250`, `C = 1100`, `B = 1100`, `A = 1200`, `S = 1300`, `OPEN = 1000`.
 9. W `App.py` ranking jest budowany sekwencyjnie: lata rosnąco, a w obrębie roku pliki według daty z nazwy `{dd}-{mm}-...`.
 10. `main.py` korzysta z tej samej funkcji przetwarzania turnieju, ale jako legacy script nie przekazuje klas z nazw plików i traktuje wszystkie dane jako jeden globalny ranking.
 
@@ -107,10 +107,11 @@ Plik `config.txt` w katalogu głównym projektu:
 ```text
 K=50
 D=250
-defaulteloC=1000
+defaulteloC=1100
 defaulteloB=1100
 defaulteloA=1200
 defaulteloS=1300
+defaulteloOPEN=1000
 ```
 
 ## Uruchamianie
