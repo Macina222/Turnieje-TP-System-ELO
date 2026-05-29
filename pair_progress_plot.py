@@ -33,6 +33,13 @@ def normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", value.strip()).casefold()
 
 
+def slugify_filename_part(value: str, fallback: str = "wykres") -> str:
+    """Zamienia tekst na bezpieczny fragment nazwy pliku."""
+    slug = re.sub(r"[^\w]+", "_", normalize_text(value), flags=re.UNICODE)
+    slug = slug.strip("_")
+    return slug or fallback
+
+
 def parse_number(value: str) -> float:
     """Parsuje liczbę z CSV, akceptując kropkę i przecinek dziesiętny."""
     return float(value.strip().replace(",", "."))
@@ -340,6 +347,46 @@ def prepare_matplotlib_config_dir() -> None:
     os.environ["MPLCONFIGDIR"] = str(cache_dir)
 
 
+def build_default_plot_filename(
+    pair_series: list[tuple[str, list[dict[str, str]]]],
+) -> str:
+    """Buduje domyślną nazwę pliku PNG dla wykresu."""
+    if len(pair_series) == 1:
+        return f"wykres_elo_{slugify_filename_part(pair_series[0][0])}.png"
+    return f"wykres_elo_porownanie_{len(pair_series)}_par.png"
+
+
+def prompt_plot_output_action(
+    pair_series: list[tuple[str, list[dict[str, str]]]],
+    project_dir: Path,
+) -> tuple[Path | None, bool]:
+    """
+    Pyta użytkownika, czy wykres pokazać, zapisać, czy zrobić obie rzeczy.
+
+    Zwraca: (ścieżka zapisu lub None, czy pokazać okno wykresu).
+    """
+    print()
+    print("Co zrobić z wykresem?")
+    print("  1. Pokaż wykres")
+    print("  2. Zapisz wykres do pliku")
+    print("  3. Zapisz do pliku i pokaż wykres")
+
+    while True:
+        choice = input("Wybór [1/2/3, Enter = 1]: ").strip()
+        if not choice:
+            return None, True
+        if choice not in {"1", "2", "3"}:
+            print("Wpisz 1, 2 albo 3.")
+            continue
+        if choice == "1":
+            return None, True
+
+        default_path = project_dir / build_default_plot_filename(pair_series)
+        raw_path = input(f"Ścieżka zapisu [{default_path}]: ").strip()
+        output_path = Path(raw_path) if raw_path else default_path
+        return output_path, choice == "3"
+
+
 def plot_pair_progress(
     pair_series: list[tuple[str, list[dict[str, str]]]],
     csv_path: Path,
@@ -588,8 +635,12 @@ def run_from_args(args: argparse.Namespace, project_dir: Path) -> int:
             dancer_2=None,
         )
 
-    output_path = Path(args.output) if args.output else None
-    show_plot = args.show or output_path is None
+    if args.output or args.show:
+        output_path = Path(args.output) if args.output else None
+        show_plot = args.show or output_path is None
+    else:
+        output_path, show_plot = prompt_plot_output_action(pair_series, project_dir)
+
     plot_pair_progress(
         pair_series=pair_series,
         csv_path=csv_path,
