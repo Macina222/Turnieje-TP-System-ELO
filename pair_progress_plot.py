@@ -45,6 +45,33 @@ def parse_number(value: str) -> float:
     return float(value.strip().replace(",", "."))
 
 
+def load_class_thresholds(config_path: Path) -> list[tuple[str, float]]:
+    """Wczytuje progi `defaultelo...` z config.txt, pomijając defaulteloOPEN."""
+    thresholds: dict[str, float] = {}
+    if not config_path.is_file():
+        return []
+
+    for raw_line in config_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        normalized_key = key.strip().lower()
+        if not normalized_key.startswith("defaultelo"):
+            continue
+
+        class_name = normalized_key[len("defaultelo"):].upper()
+        if not class_name or class_name == "OPEN":
+            continue
+
+        try:
+            thresholds[class_name] = parse_number(value)
+        except ValueError:
+            continue
+
+    return sorted(thresholds.items(), key=lambda item: (item[1], item[0]))
+
+
 def find_default_csv(project_dir: Path) -> Path:
     """Zwraca najnowszy plik `progress*.csv` w katalogu projektu."""
     candidates = [
@@ -390,6 +417,7 @@ def prompt_plot_output_action(
 def plot_pair_progress(
     pair_series: list[tuple[str, list[dict[str, str]]]],
     csv_path: Path,
+    config_path: Path,
     output_path: Path | None,
     show_plot: bool,
     title: str | None,
@@ -421,6 +449,41 @@ def plot_pair_progress(
     sns.set_theme(style="whitegrid", context="notebook")
     width = min(max(10.0, len(labels) * 1.05), 28.0)
     fig, ax = plt.subplots(figsize=(width, 6.5))
+
+    all_y: list[float] = []
+    for _, ordered_rows in pair_series:
+        all_y.extend([parse_number(row["punkty_po"]) for row in ordered_rows])
+
+    if all_y:
+        thresholds = load_class_thresholds(config_path)
+        threshold_values = [value for _, value in thresholds]
+        visible_values = all_y + threshold_values
+        min_value = min(visible_values)
+        max_value = max(visible_values)
+        margin = max(35.0, (max_value - min_value) * 0.06)
+        ax.set_ylim(min_value - margin, max_value + margin)
+
+        for class_name, value in thresholds:
+            ax.axhline(
+                y=value,
+                color="#9aa4ad",
+                linestyle="--",
+                linewidth=1.1,
+                alpha=0.75,
+                zorder=1,
+            )
+            ax.text(
+                x=0.01,
+                y=value,
+                s=f"Klasa {class_name}: {value:.0f}",
+                color="#4b5563",
+                fontsize=8.5,
+                fontweight="semibold",
+                va="bottom",
+                ha="left",
+                transform=ax.get_yaxis_transform(),
+                zorder=2,
+            )
 
     palette = sns.color_palette(
         "tab10" if len(pair_series) <= 10 else "husl",
@@ -644,6 +707,7 @@ def run_from_args(args: argparse.Namespace, project_dir: Path) -> int:
     plot_pair_progress(
         pair_series=pair_series,
         csv_path=csv_path,
+        config_path=project_dir / "config.txt",
         output_path=output_path,
         show_plot=show_plot,
         title=args.title,
