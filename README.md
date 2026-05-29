@@ -205,6 +205,8 @@ python3 pair_progress_plot.py --input progress_v_S_OPEN_A_B_bez_sufiksu_DEBIUT_2
 Jeśli nie podasz ścieżki CSV, skrypt użyje najnowszego pliku `progress*.csv`
 z katalogu projektu. Na osi Y pokazuje `punkty_po`, czyli ELO pary po danym
 występie, a na osi X kolejne występy pary uporządkowane chronologicznie.
+Na wykresie pojawiają się też poziome przerywane linie progów z `config.txt`
+odczytane z `defaultelo...`; `defaulteloOPEN` jest pomijany.
 Jeśli nie podasz `--output` ani `--show`, program zapyta, czy wykres pokazać,
 zapisać do pliku, czy zapisać i pokazać. `--output` zapisuje wykres do pliku;
 gdy użyjesz `--output`, okno wykresu nie otwiera się automatycznie, chyba że
