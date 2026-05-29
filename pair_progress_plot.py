@@ -1,15 +1,17 @@
 """
-Wykres historii rankingu ELO wybranej pary na podstawie CSV z progress_export.py.
+Wykres historii rankingu ELO wybranych par na podstawie CSV z progress_export.py.
 
-Skrypt czyta wiersze eksportu postępu, filtruje występy jednej pary i rysuje
-wykres `punkty_po` po kolejnych turniejach z użyciem Seaborn.
+Skrypt czyta wiersze eksportu postępu, filtruje występy jednej albo kilku par
+i rysuje wykres `punkty_po` po kolejnych turniejach z użyciem Seaborn.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Iterable
 
@@ -177,39 +179,62 @@ def sorted_pair_rows(rows: Iterable[dict[str, str]]) -> list[dict[str, str]]:
     )
 
 
-def choose_pair_interactively(rows: list[dict[str, str]]) -> str:
-    """Prosty wybór pary w terminalu przez wpisanie fragmentu nazwy."""
+def choose_pairs_interactively(rows: list[dict[str, str]]) -> list[str]:
+    """Prosty wybór jednej lub wielu par w terminalu przez fragment nazwy."""
     pairs = unique_pairs(rows)
+    selected_pairs: list[str] = []
     print(f"W CSV znaleziono pary: {len(pairs)}")
 
     while True:
-        search_text = input("Wpisz fragment nazwy pary: ").strip()
+        if selected_pairs:
+            prompt = (
+                "Wpisz fragment kolejnej pary "
+                "(Enter = rysuj wybrane pary): "
+            )
+        else:
+            prompt = "Wpisz fragment nazwy pary: "
+        search_text = input(prompt).strip()
         if not search_text:
+            if selected_pairs:
+                return selected_pairs
             print("Podaj przynajmniej fragment nazwiska lub imienia.")
             continue
 
-        matches = filter_pair_catalog(pairs, search_text)
+        matches = [
+            pair
+            for pair in filter_pair_catalog(pairs, search_text)
+            if pair["para"] not in selected_pairs
+        ]
         if not matches:
-            print("Brak pasujących par.")
+            print("Brak nowych pasujących par.")
             continue
         if len(matches) == 1:
             selected = matches[0]["para"]
-            print(f"Wybrano: {selected}")
-            return selected
+            selected_pairs.append(selected)
+            print(f"Dodano: {selected}")
+            continue
 
         print_pairs(matches, limit=20)
         choice = input("Wybierz numer z listy albo wpisz nowy fragment: ").strip()
         if choice.isdigit():
             index = int(choice)
             if 1 <= index <= min(len(matches), 20):
-                return matches[index - 1]["para"]
+                selected = matches[index - 1]["para"]
+                selected_pairs.append(selected)
+                print(f"Dodano: {selected}")
+                continue
         if choice:
             search_text = choice
-            matches = filter_pair_catalog(pairs, search_text)
+            matches = [
+                pair
+                for pair in filter_pair_catalog(pairs, search_text)
+                if pair["para"] not in selected_pairs
+            ]
             if len(matches) == 1:
                 selected = matches[0]["para"]
-                print(f"Wybrano: {selected}")
-                return selected
+                selected_pairs.append(selected)
+                print(f"Dodano: {selected}")
+                continue
         print("Nie wybrano poprawnej pozycji.")
 
 
@@ -219,15 +244,113 @@ def format_tournament_label(row: dict[str, str]) -> str:
     return f"{row['data_turnieju']}\n{row['turniej']} ({category})"
 
 
-def plot_pair_progress(
+def tournament_key(row: dict[str, str]) -> str:
+    """Zwraca stabilny klucz turnieju/kategorii dla wspólnej osi X."""
+    source_file = row.get("plik", "")
+    if source_file:
+        return source_file
+    return "|".join([row["data_turnieju"], row["turniej"], row["podkategoria"]])
+
+
+def row_order(row: dict[str, str]) -> int:
+    """Zwraca kolejność wiersza w CSV jako liczbę."""
+    return int(row.get("_row_order", "0") or 0)
+
+
+def build_tournament_axis(
+    pair_series: list[tuple[str, list[dict[str, str]]]],
+) -> tuple[dict[str, int], list[str]]:
+    """Buduje wspólną chronologiczną oś X z sumy występów wybranych par."""
+    tournaments: dict[str, dict[str, str]] = {}
+    for _, rows in pair_series:
+        for row in sorted_pair_rows(rows):
+            key = tournament_key(row)
+            if key not in tournaments:
+                tournaments[key] = row
+
+    ordered_keys = sorted(
+        tournaments,
+        key=lambda key: (
+            tournaments[key]["data_turnieju"],
+            row_order(tournaments[key]),
+        ),
+    )
+    x_by_key = {key: index for index, key in enumerate(ordered_keys, start=1)}
+    labels = [format_tournament_label(tournaments[key]) for key in ordered_keys]
+    return x_by_key, labels
+
+
+def add_pair_selection(
+    selections: list[tuple[str, list[dict[str, str]]]],
+    selected_keys: set[str],
+    pair_rows: list[dict[str, str]],
+    selector_label: str,
+) -> None:
+    """Dodaje parę do listy serii, walidując brak wyników i duplikaty."""
+    if not pair_rows:
+        raise ValueError(f"Nie znaleziono występów pary: {selector_label}")
+
+    ordered_rows = sorted_pair_rows(pair_rows)
+    pair_name = ordered_rows[0]["para"]
+    pair_key = normalize_text(pair_name)
+    if pair_key in selected_keys:
+        return
+
+    selected_keys.add(pair_key)
+    selections.append((pair_name, ordered_rows))
+
+
+def resolve_pair_series(
     rows: list[dict[str, str]],
+    pair_names: Iterable[str],
+    dancer_1: str | None,
+    dancer_2: str | None,
+) -> list[tuple[str, list[dict[str, str]]]]:
+    """Zamienia wybór z CLI na serie danych gotowe do wykresu."""
+    selections: list[tuple[str, list[dict[str, str]]]] = []
+    selected_keys: set[str] = set()
+
+    for pair_name in pair_names:
+        add_pair_selection(
+            selections,
+            selected_keys,
+            pair_rows_by_name(rows, pair_name),
+            pair_name,
+        )
+
+    if dancer_1 and dancer_2:
+        add_pair_selection(
+            selections,
+            selected_keys,
+            pair_rows_by_dancers(rows, dancer_1, dancer_2),
+            f"{dancer_1}, {dancer_2}",
+        )
+    elif dancer_1 or dancer_2:
+        raise ValueError("Argumenty --tancerz1 i --tancerz2 muszą być podane razem.")
+
+    return selections
+
+
+def prepare_matplotlib_config_dir() -> None:
+    """Ustawia zapisywalny katalog cache Matplotlib, jeśli użytkownik go nie wskazał."""
+    if "MPLCONFIGDIR" in os.environ:
+        return
+    cache_dir = Path(tempfile.gettempdir()) / "turnieje_tp_matplotlib"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["MPLCONFIGDIR"] = str(cache_dir)
+
+
+def plot_pair_progress(
+    pair_series: list[tuple[str, list[dict[str, str]]]],
     csv_path: Path,
     output_path: Path | None,
     show_plot: bool,
     title: str | None,
 ) -> None:
-    """Rysuje i opcjonalnie zapisuje wykres ELO pary."""
+    """Rysuje i opcjonalnie zapisuje wykres ELO jednej albo wielu par."""
     try:
+        prepare_matplotlib_config_dir()
+
         import matplotlib
 
         if output_path and not show_plot:
@@ -243,50 +366,88 @@ def plot_pair_progress(
             "python3 -m pip install seaborn matplotlib"
         ) from exc
 
-    ordered_rows = sorted_pair_rows(rows)
-    x_values = list(range(1, len(ordered_rows) + 1))
-    y_values = [parse_number(row["punkty_po"]) for row in ordered_rows]
-    labels = [format_tournament_label(row) for row in ordered_rows]
-    pair_name = ordered_rows[0]["para"]
+    if not pair_series:
+        raise ValueError("Nie wybrano żadnej pary do wykresu.")
+
+    x_by_key, labels = build_tournament_axis(pair_series)
 
     sns.set_theme(style="whitegrid", context="notebook")
-    width = min(max(10.0, len(ordered_rows) * 1.05), 26.0)
+    width = min(max(10.0, len(labels) * 1.05), 28.0)
     fig, ax = plt.subplots(figsize=(width, 6.5))
 
-    sns.lineplot(
-        x=x_values,
-        y=y_values,
-        marker="o",
-        linewidth=2.4,
-        markersize=7,
-        ax=ax,
+    palette = sns.color_palette(
+        "tab10" if len(pair_series) <= 10 else "husl",
+        n_colors=len(pair_series),
     )
 
-    ax.set_title(title or f"Historia rankingu ELO: {pair_name}", pad=18)
+    for series_index, (pair_name, ordered_rows) in enumerate(pair_series):
+        x_values = [x_by_key[tournament_key(row)] for row in ordered_rows]
+        y_values = [parse_number(row["punkty_po"]) for row in ordered_rows]
+
+        sns.lineplot(
+            x=x_values,
+            y=y_values,
+            marker="o",
+            linewidth=2.4,
+            markersize=7,
+            label=pair_name,
+            color=palette[series_index],
+            ax=ax,
+        )
+
+        if len(pair_series) == 1:
+            for x_value, y_value, row in zip(x_values, y_values, ordered_rows):
+                ax.annotate(
+                    f"{y_value:.0f}",
+                    (x_value, y_value),
+                    textcoords="offset points",
+                    xytext=(0, 8),
+                    ha="center",
+                    fontsize=8,
+                )
+                ax.annotate(
+                    f"#{row['lokata']}",
+                    (x_value, y_value),
+                    textcoords="offset points",
+                    xytext=(0, -14),
+                    ha="center",
+                    fontsize=8,
+                    color="dimgray",
+                )
+        else:
+            last_x = x_values[-1]
+            last_y = y_values[-1]
+            ax.annotate(
+                f"{last_y:.0f}",
+                (last_x, last_y),
+                textcoords="offset points",
+                xytext=(7, 0),
+                ha="left",
+                va="center",
+                fontsize=8,
+                color=palette[series_index],
+            )
+
+    if title:
+        chart_title = title
+    elif len(pair_series) == 1:
+        chart_title = f"Historia rankingu ELO: {pair_series[0][0]}"
+    else:
+        chart_title = "Historia rankingu ELO wybranych par"
+
+    ax.set_title(chart_title, pad=18)
     ax.set_xlabel("Turnieje chronologicznie")
     ax.set_ylabel("Ranking ELO")
-    ax.set_xticks(x_values)
+    ax.set_xticks(list(range(1, len(labels) + 1)))
     ax.set_xticklabels(labels, rotation=45, ha="right")
     ax.margins(x=0.03)
 
-    for x_value, y_value, row in zip(x_values, y_values, ordered_rows):
-        ax.annotate(
-            f"{y_value:.0f}",
-            (x_value, y_value),
-            textcoords="offset points",
-            xytext=(0, 8),
-            ha="center",
-            fontsize=8,
-        )
-        ax.annotate(
-            f"#{row['lokata']}",
-            (x_value, y_value),
-            textcoords="offset points",
-            xytext=(0, -14),
-            ha="center",
-            fontsize=8,
-            color="dimgray",
-        )
+    if len(pair_series) > 1:
+        ax.legend(title="Pary", loc="upper left", bbox_to_anchor=(1.01, 1))
+    else:
+        legend = ax.get_legend()
+        if legend:
+            legend.remove()
 
     fig.text(
         0.01,
@@ -295,7 +456,8 @@ def plot_pair_progress(
         fontsize=8,
         color="dimgray",
     )
-    fig.tight_layout(rect=(0, 0.03, 1, 1))
+    right_margin = 0.78 if len(pair_series) > 1 else 1
+    fig.tight_layout(rect=(0, 0.03, right_margin, 1))
 
     if output_path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -320,7 +482,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
     """Buduje parser argumentów CLI."""
     parser = argparse.ArgumentParser(
         description=(
-            "Rysuje wykres historii ELO pary na podstawie CSV z progress_export.py."
+            "Rysuje wykres historii ELO jednej albo wielu par "
+            "na podstawie CSV z progress_export.py."
         )
     )
     parser.add_argument(
@@ -335,7 +498,19 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--pair",
-        help='Nazwa pary z kolumny `para`, np. "Pasiut Paweł, Ziółek Weronika".',
+        action="append",
+        help=(
+            "Nazwa pary z kolumny `para`. Można podać wiele razy, "
+            'np. --pair "Pasiut Paweł, Ziółek Weronika" --pair "Teperek Kajetan, Drzas Joanna".'
+        ),
+    )
+    parser.add_argument(
+        "--pairs",
+        nargs="+",
+        help=(
+            "Kilka nazw par jako osobne argumenty, np. "
+            '--pairs "Pasiut Paweł, Ziółek Weronika" "Teperek Kajetan, Drzas Joanna".'
+        ),
     )
     parser.add_argument(
         "--tancerz1",
@@ -392,23 +567,31 @@ def run_from_args(args: argparse.Namespace, project_dir: Path) -> int:
         print_pairs(pairs, limit=max(args.limit, 1))
         return 0
 
+    requested_pairs: list[str] = []
     if args.pair:
-        pair_rows = pair_rows_by_name(rows, args.pair)
-    elif args.tancerz1 and args.tancerz2:
-        pair_rows = pair_rows_by_dancers(rows, args.tancerz1, args.tancerz2)
-    elif args.tancerz1 or args.tancerz2:
-        raise ValueError("Argumenty --tancerz1 i --tancerz2 muszą być podane razem.")
-    else:
-        selected_pair = choose_pair_interactively(rows)
-        pair_rows = pair_rows_by_name(rows, selected_pair)
+        requested_pairs.extend(args.pair)
+    if args.pairs:
+        requested_pairs.extend(args.pairs)
 
-    if not pair_rows:
-        raise ValueError("Nie znaleziono występów wybranej pary w podanym CSV.")
+    pair_series = resolve_pair_series(
+        rows=rows,
+        pair_names=requested_pairs,
+        dancer_1=args.tancerz1,
+        dancer_2=args.tancerz2,
+    )
+    if not pair_series:
+        selected_pairs = choose_pairs_interactively(rows)
+        pair_series = resolve_pair_series(
+            rows=rows,
+            pair_names=selected_pairs,
+            dancer_1=None,
+            dancer_2=None,
+        )
 
     output_path = Path(args.output) if args.output else None
     show_plot = args.show or output_path is None
     plot_pair_progress(
-        rows=pair_rows,
+        pair_series=pair_series,
         csv_path=csv_path,
         output_path=output_path,
         show_plot=show_plot,
