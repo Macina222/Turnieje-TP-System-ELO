@@ -183,6 +183,27 @@ i ścieżkę zapisu. Plik CSV ma domyślnie separator średnika i zawiera m.in.:
 - nazwiska tancerzy,
 - `punkty_przed`, `punkty_po` i `roznica_punktow`.
 
+### 5. Wykres ELO pary z CSV postępu
+
+Wykres korzysta z CSV wygenerowanego przez `progress_export.py` i wymaga paczki
+`seaborn` oraz biblioteki rysującej `matplotlib`:
+
+```bash
+python3 -m pip install seaborn matplotlib
+```
+
+Przykłady:
+
+```bash
+python3 pair_progress_plot.py progress_v_S_OPEN_A_B_bez_sufiksu_DEBIUT_2023_2024_2025.csv --pair "Pasiut Paweł, Ziółek Weronika"
+python3 pair_progress_plot.py --input progress_v_S_OPEN_A_B_bez_sufiksu_DEBIUT_2023_2024_2025.csv --list-pairs --search "Pasiut"
+python3 pair_progress_plot.py --input progress_v_S_OPEN_A_B_bez_sufiksu_DEBIUT_2023_2024_2025.csv --pair "Pasiut Paweł, Ziółek Weronika" --output wykres_pasiut_ziolek.png
+```
+
+Jeśli nie podasz ścieżki CSV, skrypt użyje najnowszego pliku `progress*.csv`
+z katalogu projektu. Na osi Y pokazuje `punkty_po`, czyli ELO pary po danym
+występie, a na osi X kolejne występy pary uporządkowane chronologicznie.
+
 ## Raport wynikowy
 
 Raport generowany przez `App.py` zawiera:
