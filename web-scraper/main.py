@@ -247,8 +247,10 @@ def get_results(page, tournament: dict, debug: bool) -> list:
         return []
 
     if debug:
-        path = f"debug_{tournament['id']}.png"
-        page.screenshot(path=path)
+        img_dir = Path(__file__).resolve().parent.parent / "img"
+        img_dir.mkdir(parents=True, exist_ok=True)
+        path = img_dir / f"debug_{tournament['id']}.png"
+        page.screenshot(path=str(path))
         log(f"    Zrzut: {path}", "DEBUG")
 
     # Pobieramy wszystkie bloki kategorii przez JavaScript w jednym wywołaniu.
@@ -431,6 +433,12 @@ def save_csv(records: list, output_path: str):
         log("Brak danych do zapisania.", "WARN")
         return
 
+    project_root = Path(__file__).resolve().parent.parent
+    out_path = Path(output_path)
+    if not out_path.is_absolute() and len(out_path.parts) == 1:
+        out_path = project_root / "csv" / out_path
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
     if HAS_PANDAS:
         df = pd.DataFrame(records)
         cols = [c for c in PREFERRED_COLS if c in df.columns]
@@ -440,8 +448,8 @@ def save_csv(records: list, output_path: str):
         df = df.drop_duplicates()
         if before != len(df):
             log(f"Usunięto {before - len(df)} duplikatów.")
-        df.to_csv(output_path, index=False, encoding="utf-8-sig")
-        log(f"\nZapisano {len(df)} wierszy → {output_path}")
+        df.to_csv(out_path, index=False, encoding="utf-8-sig")
+        log(f"\nZapisano {len(df)} wierszy → {out_path}")
         log(f"Kolumny: {list(df.columns)}")
         print("\n--- Podgląd (pierwsze 10 wierszy) ---")
         print(df.head(10).to_string(index=False))
@@ -453,11 +461,11 @@ def save_csv(records: list, output_path: str):
                     all_keys.append(k)
         ordered = [k for k in PREFERRED_COLS if k in all_keys]
         ordered += [k for k in all_keys if k not in ordered]
-        with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
+        with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.DictWriter(f, fieldnames=ordered, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(records)
-        log(f"Zapisano {len(records)} wierszy → {output_path}")
+        log(f"Zapisano {len(records)} wierszy → {out_path}")
 
 
 def save_organized_data(records: list, output_dir: str = DEFAULT_RSC_DIR):

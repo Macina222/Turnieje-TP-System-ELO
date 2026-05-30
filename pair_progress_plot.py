@@ -73,15 +73,19 @@ def load_class_thresholds(config_path: Path) -> list[tuple[str, float]]:
 
 
 def find_default_csv(project_dir: Path) -> Path:
-    """Zwraca najnowszy plik `progress*.csv` w katalogu projektu."""
-    candidates = [
-        path
-        for path in project_dir.glob("progress*.csv")
-        if path.is_file() and not path.name.startswith(".~lock.")
-    ]
+    """Zwraca najnowszy plik `progress*.csv` w katalogu projektu lub podfolderze `csv/`."""
+    search_dirs = [project_dir, project_dir / "csv"]
+    candidates = []
+    for d in search_dirs:
+        if d.is_dir():
+            candidates.extend([
+                path
+                for path in d.glob("progress*.csv")
+                if path.is_file() and not path.name.startswith(".~lock.")
+            ])
     if not candidates:
         raise FileNotFoundError(
-            "Nie podano pliku CSV i nie znaleziono `progress*.csv` w katalogu projektu."
+            "Nie podano pliku CSV i nie znaleziono `progress*.csv` w katalogu projektu ani w podfolderze `csv/`."
         )
     return max(candidates, key=lambda path: path.stat().st_mtime)
 
@@ -408,9 +412,13 @@ def prompt_plot_output_action(
         if choice == "1":
             return None, True
 
-        default_path = project_dir / build_default_plot_filename(pair_series)
+        img_dir = project_dir / "img"
+        img_dir.mkdir(parents=True, exist_ok=True)
+        default_path = img_dir / build_default_plot_filename(pair_series)
         raw_path = input(f"Ścieżka zapisu [{default_path}]: ").strip()
         output_path = Path(raw_path) if raw_path else default_path
+        if not output_path.is_absolute() and len(output_path.parts) == 1:
+            output_path = img_dir / output_path
         return output_path, choice == "3"
 
 
@@ -701,6 +709,8 @@ def run_from_args(args: argparse.Namespace, project_dir: Path) -> int:
     if args.output or args.show:
         output_path = Path(args.output) if args.output else None
         show_plot = args.show or output_path is None
+        if output_path and not output_path.is_absolute() and len(output_path.parts) == 1:
+            output_path = project_dir / "img" / output_path
     else:
         output_path, show_plot = prompt_plot_output_action(pair_series, project_dir)
 

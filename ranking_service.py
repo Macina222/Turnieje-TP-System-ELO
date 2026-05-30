@@ -981,6 +981,7 @@ def build_default_progress_filename(result: ProgressExportResult) -> str:
 def save_ranking_report(report_text: str, output_path: str | Path) -> Path:
     """Zapisuje gotowy raport tekstowy do wskazanego pliku."""
     path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(report_text, encoding="utf-8")
     return path
 
@@ -993,6 +994,7 @@ def save_progress_csv(
 ) -> Path:
     """Zapisuje historię zmian punktów do pliku CSV."""
     path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "rok",
         "data_turnieju",
