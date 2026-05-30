@@ -193,7 +193,14 @@ def run_export(
         rsc_dir=rsc_dir,
         classes=classes,
     )
-    target_path = output_path or project_dir / build_default_progress_filename(result)
+    csv_dir = project_dir / "csv"
+    if output_path:
+        target_path = output_path
+        if not target_path.is_absolute() and len(target_path.parts) == 1:
+            target_path = csv_dir / target_path
+    else:
+        target_path = csv_dir / build_default_progress_filename(result)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
     saved_path = save_progress_csv(result, target_path, delimiter=delimiter)
 
     classes_label = format_classes_for_display(result.included_classes)
@@ -238,9 +245,14 @@ def run_interactive(project_dir: Path, delimiter: str) -> int:
         rsc_dir=rsc_dir,
         classes=selected_classes,
     )
-    default_path = project_dir / build_default_progress_filename(preview_result)
+    csv_dir = project_dir / "csv"
+    csv_dir.mkdir(parents=True, exist_ok=True)
+    default_path = csv_dir / build_default_progress_filename(preview_result)
     target = input(f"Ścieżka zapisu CSV [{default_path}]: ").strip()
     output_path = Path(target) if target else default_path
+    if not output_path.is_absolute() and len(output_path.parts) == 1:
+        output_path = csv_dir / output_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     saved_path = save_progress_csv(preview_result, output_path, delimiter=delimiter)
     print(f"Zapisano CSV: {saved_path}")
