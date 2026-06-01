@@ -1,6 +1,7 @@
 K=50
 D=250
-defaulteloC=1000
-defaulteloB=1100
-defaulteloA=1200
-defaulteloS=1300
+defaulteloC=800
+defaulteloB=900
+defaulteloA=1000
+defaulteloS=1100
+defaulteloOPEN=950

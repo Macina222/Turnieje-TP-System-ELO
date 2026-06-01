@@ -87,6 +87,19 @@ class Para:
 
 
 @dataclass(frozen=True)
+class TournamentEntry:
+    """Jeden poprawny wpis pary odczytany z pliku wyników turnieju."""
+    place: int
+    tancerz1: str
+    tancerz2: str
+    osrodek: str = ""
+    instruktor: str = ""
+
+    def pobierz_id(self) -> tuple[str, str]:
+        return self.tancerz1, self.tancerz2
+
+
+@dataclass(frozen=True)
 class RankingBuildResult:
     """
     Zbiera pełny rezultat pojedynczego przebiegu budowy rankingu.
@@ -99,6 +112,37 @@ class RankingBuildResult:
     processed_files: tuple[Path, ...]
     included_categories: tuple[str, ...]
     included_classes: tuple[str, ...]   # klasy uwzględnione w tym przebiegu
+    skipped_files: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class TournamentProgressRow:
+    """Zmiana punktów jednej pary po jednym turnieju."""
+    year: int
+    tournament_date: str
+    tournament_name: str
+    source_file: str
+    category: str
+    exact_category: str
+    klasa: str
+    place: int
+    tancerz1: str
+    tancerz2: str
+    pair_name: str
+    points_before: float
+    points_after: float
+    points_delta: float
+
+
+@dataclass(frozen=True)
+class ProgressExportResult:
+    """Pełny rezultat budowania historii zmian punktów pod eksport CSV."""
+    category: str
+    years: tuple[int, ...]
+    rows: tuple[TournamentProgressRow, ...]
+    processed_files: tuple[Path, ...]
+    included_categories: tuple[str, ...]
+    included_classes: tuple[str, ...]
     skipped_files: tuple[tuple[str, str], ...]
 
 
@@ -192,6 +236,73 @@ def _class_sort_key(klasa: str) -> tuple:
         return (1, 0, klasa)
 
 
+def format_class_for_display(klasa: str) -> str:
+    """Zwraca czytelną etykietę klasy do raportów i komunikatów."""
+    return klasa if klasa else "(brak sufiksu)"
+
+
+def format_classes_for_display(classes: Iterable[str]) -> str:
+    """Formatuje listę klas do wyświetlenia użytkownikowi."""
+    class_list = list(classes)
+    if not class_list:
+        return "wszystkie"
+    return ", ".join(format_class_for_display(klasa) for klasa in class_list)
+
+
+def _class_for_filename(klasa: str) -> str:
+    """Zwraca bezpieczny fragment nazwy pliku dla klasy."""
+    return klasa if klasa else "bez_sufiksu"
+
+
+def describe_tournament_file(
+    file_path: str | Path,
+    rsc_dir: str | Path = "rsc",
+) -> dict[str, object]:
+    """
+    Wyciąga metadane turnieju z nazwy pliku `rsc/{rok}/{dd-mm-turniej}-{kat}.txt`.
+
+    Zwraca słownik z rokiem, datą ISO, nazwą turnieju, relatywną ścieżką pliku,
+    podkategorią i klasą. Przy nietypowej nazwie zostawia puste wartości tam,
+    gdzie nie da się ich wiarygodnie odczytać.
+    """
+    path = Path(file_path)
+    root = Path(rsc_dir)
+    year = int(path.parent.name) if path.parent.name.isdigit() else 0
+    category_slug = extract_category_slug(path) or ""
+    base_category, klasa = extract_base_and_class(category_slug)
+
+    try:
+        source_file = str(path.relative_to(root))
+    except ValueError:
+        source_file = str(path)
+
+    tournament_date = ""
+    tournament_name = path.stem
+    parts = path.stem.split("-")
+    if len(parts) >= 4:
+        try:
+            day = int(parts[0])
+            month = int(parts[1])
+            tournament_date = (
+                f"{year:04d}-{month:02d}-{day:02d}"
+                if year
+                else f"{day:02d}-{month:02d}"
+            )
+            tournament_name = "-".join(parts[2:-1]) or path.stem
+        except ValueError:
+            pass
+
+    return {
+        "year": year,
+        "tournament_date": tournament_date,
+        "tournament_name": tournament_name,
+        "source_file": source_file,
+        "category": base_category or "",
+        "exact_category": category_slug.upper(),
+        "klasa": klasa,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Konfiguracja
 # ---------------------------------------------------------------------------
@@ -223,6 +334,7 @@ def load_ranking_config(config_path: str | Path | None = None) -> RankingConfig:
       defaulteloB=<liczba> — domyślne ELO dla klasy B
       defaulteloA=<liczba> — domyślne ELO dla klasy A
       defaulteloS=<liczba> — domyślne ELO dla klasy S
+      defaulteloOPEN=<liczba> — domyślne ELO dla OPEN i pozostałych klas
     """
     path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
     if not path.is_file():
@@ -273,14 +385,15 @@ def get_default_elo_for_class(klasa: str, class_default_elos: dict[str, float]) 
     """
     Zwraca domyślne ELO dla danej klasy.
 
-    Jeśli klasa nie jest skonfigurowana (np. "AB", ""), zwraca najniższe
-    z dostępnych domyślnych ELO — zgodnie z założeniem, że nieznana klasa
-    traktowana jest jako najniższa.
+    Klasy S, A, B i C mogą mieć własne wartości w config.txt. OPEN oraz
+    pozostałe sufiksy klas, np. "AB", "DEBIUT" albo brak sufiksu, korzystają
+    z `defaulteloOPEN`. Gdy stary config nie ma tej wartości, używana jest
+    stała DEFAULT_ELO.
     """
     if klasa in class_default_elos:
         return class_default_elos[klasa]
-    if class_default_elos:
-        return min(class_default_elos.values())
+    if "OPEN" in class_default_elos:
+        return class_default_elos["OPEN"]
     return DEFAULT_ELO
 
 
@@ -343,6 +456,65 @@ def aktualizacja_rankingu(
 # Przetwarzanie plików
 # ---------------------------------------------------------------------------
 
+def read_tournament_entries(sciezka_do_pliku: str | Path) -> list[TournamentEntry]:
+    """
+    Wczytuje poprawne wpisy par z pojedynczego pliku wynikowego.
+
+    Rekordy z niejednoznacznym polem `Para` są pomijane tak samo jak w
+    dotychczasowym przetwarzaniu rankingu. Brak wymaganych kolumn albo
+    niepoprawna lokata przerywają przetwarzanie pliku.
+    """
+    entries: list[TournamentEntry] = []
+
+    with open(sciezka_do_pliku, "r", encoding="utf-8") as plik:
+        czytnik = csv.DictReader(plik, delimiter=";")
+        for line_number, wiersz in enumerate(czytnik, start=2):
+            try:
+                lokata = int(str(wiersz["Lokata"]).strip())
+                raw_pair = wiersz["Para"]
+            except KeyError as exc:
+                raise KeyError(f"Brak wymaganej kolumny w pliku: {exc}") from exc
+            except ValueError as exc:
+                raise ValueError(
+                    f"Nieprawidlowa lokata w linii {line_number}: {wiersz.get('Lokata')!r}"
+                ) from exc
+
+            para_nazwy = parse_pair_names(raw_pair)
+            if para_nazwy is None:
+                continue
+
+            entries.append(
+                TournamentEntry(
+                    place=lokata,
+                    tancerz1=para_nazwy[0],
+                    tancerz2=para_nazwy[1],
+                    osrodek=str(wiersz.get("Ośrodek", "") or "").strip(),
+                    instruktor=str(wiersz.get("Instruktor", "") or "").strip(),
+                )
+            )
+
+    return entries
+
+
+def _ensure_pair_in_database(
+    baza_danych: dict[tuple[str, str], Para],
+    entry: TournamentEntry,
+    file_class: str,
+    class_default_elos: dict[str, float],
+) -> Para:
+    """Dodaje nową parę do bazy z domyślnym ELO, jeśli jeszcze jej nie ma."""
+    id_pary = entry.pobierz_id()
+    if id_pary not in baza_danych:
+        default_elo = get_default_elo_for_class(file_class, class_default_elos)
+        baza_danych[id_pary] = Para(
+            entry.tancerz1,
+            entry.tancerz2,
+            elo=default_elo,
+            klasa=file_class,
+        )
+    return baza_danych[id_pary]
+
+
 def przetworz_turniej(
     sciezka_do_pliku: str | Path,
     baza_danych: dict[tuple[str, str], Para],
@@ -372,30 +544,20 @@ def przetworz_turniej(
         class_default_elos = {}
 
     lista_do_kalkulatora: list[dict[str, object]] = []
+    entries = read_tournament_entries(sciezka_do_pliku)
 
-    with open(sciezka_do_pliku, "r", encoding="utf-8") as plik:
-        czytnik = csv.DictReader(plik, delimiter=";")
-        for wiersz in czytnik:
-            lokata = int(wiersz["Lokata"])
-            para_nazwy = parse_pair_names(wiersz["Para"])
-            if para_nazwy is None:
-                continue
-            tancerz1, tancerz2 = para_nazwy
-            id_pary = (tancerz1, tancerz2)
-
-            if id_pary not in baza_danych:
-                # Nowa para — przypisujemy klasę i domyślne ELO
-                default_elo = get_default_elo_for_class(file_class, class_default_elos)
-                baza_danych[id_pary] = Para(
-                    tancerz1, tancerz2, elo=default_elo, klasa=file_class
-                )
-
-            para = baza_danych[id_pary]
-            lista_do_kalkulatora.append({
-                "id": id_pary,
-                "elo": para.elo,
-                "place": lokata,
-            })
+    for entry in entries:
+        para = _ensure_pair_in_database(
+            baza_danych,
+            entry,
+            file_class=file_class,
+            class_default_elos=class_default_elos,
+        )
+        lista_do_kalkulatora.append({
+            "id": entry.pobierz_id(),
+            "elo": para.elo,
+            "place": entry.place,
+        })
 
     aktualizacja_rankingu(lista_do_kalkulatora, wskaznik_k, wskaznik_d)
 
@@ -620,6 +782,116 @@ def build_ranking(
     )
 
 
+def build_progress_export(
+    category: str,
+    years: Iterable[int | str],
+    rsc_dir: str | Path = "rsc",
+    k_factor: float | None = None,
+    d_factor: float | None = None,
+    config_path: str | Path | None = None,
+    classes: Iterable[str] | None = None,
+) -> ProgressExportResult:
+    """
+    Buduje historię zmian punktów par po każdym turnieju.
+
+    Zwracane wiersze odpowiadają występom par w kolejnych plikach turniejowych.
+    Dla każdego występu zapisane są punkty przed turniejem, punkty po turnieju,
+    różnica oraz lokata pary w tym turnieju.
+    """
+    normalized_category = detect_base_category(category)
+    selected_years = normalize_years(years)
+
+    config = load_ranking_config(config_path)
+    if k_factor is None:
+        k_factor = config.k_factor
+    if d_factor is None:
+        d_factor = config.d_factor
+    class_default_elos = config.class_default_elos
+
+    matching_files, included_categories, included_classes = collect_category_files(
+        category=category,
+        years=selected_years,
+        rsc_dir=rsc_dir,
+        classes=classes,
+    )
+
+    if not matching_files:
+        years_label = ", ".join(str(year) for year in selected_years)
+        raise ValueError(
+            f"Brak plików dla kategorii {normalized_category} w latach: {years_label}."
+        )
+
+    root = Path(rsc_dir)
+    baza_par: dict[tuple[str, str], Para] = {}
+    rows: list[TournamentProgressRow] = []
+    skipped_files: list[tuple[str, str]] = []
+
+    for file_path in matching_files:
+        category_slug = extract_category_slug(file_path)
+        _, file_class = extract_base_and_class(category_slug or "")
+
+        try:
+            entries = read_tournament_entries(file_path)
+            lista_do_kalkulatora: list[dict[str, object]] = []
+            points_before: list[float] = []
+
+            for entry in entries:
+                para = _ensure_pair_in_database(
+                    baza_par,
+                    entry,
+                    file_class=file_class,
+                    class_default_elos=class_default_elos,
+                )
+                points_before.append(para.elo)
+                lista_do_kalkulatora.append({
+                    "id": entry.pobierz_id(),
+                    "elo": para.elo,
+                    "place": entry.place,
+                })
+
+            aktualizacja_rankingu(lista_do_kalkulatora, k_factor, d_factor)
+
+            points_after = [float(wpis["elo"]) for wpis in lista_do_kalkulatora]
+            for wpis in lista_do_kalkulatora:
+                pair_id = wpis["id"]
+                if not isinstance(pair_id, tuple):
+                    continue
+                baza_par[pair_id].elo = float(wpis["elo"])
+
+            file_info = describe_tournament_file(file_path, root)
+            for entry, before, after in zip(entries, points_before, points_after):
+                rows.append(
+                    TournamentProgressRow(
+                        year=int(file_info["year"]),
+                        tournament_date=str(file_info["tournament_date"]),
+                        tournament_name=str(file_info["tournament_name"]),
+                        source_file=str(file_info["source_file"]),
+                        category=str(file_info["category"]),
+                        exact_category=str(file_info["exact_category"]),
+                        klasa=str(file_info["klasa"]),
+                        place=entry.place,
+                        tancerz1=entry.tancerz1,
+                        tancerz2=entry.tancerz2,
+                        pair_name=f"{entry.tancerz1}, {entry.tancerz2}",
+                        points_before=before,
+                        points_after=after,
+                        points_delta=after - before,
+                    )
+                )
+        except Exception as exc:
+            skipped_files.append((str(file_path), str(exc)))
+
+    return ProgressExportResult(
+        category=normalized_category or category.upper(),
+        years=selected_years,
+        rows=tuple(rows),
+        processed_files=tuple(matching_files),
+        included_categories=tuple(included_categories),
+        included_classes=tuple(included_classes),
+        skipped_files=tuple(skipped_files),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Formatowanie raportu
 # ---------------------------------------------------------------------------
@@ -649,9 +921,7 @@ def format_ranking_report(result: RankingBuildResult) -> str:
     Zawiera filtry wejściowe, liczbę plików, listę podkategorii i klas,
     tabelę rankingową oraz ewentualne pliki pominięte z błędami.
     """
-    classes_label = (
-        ", ".join(result.included_classes) if result.included_classes else "wszystkie"
-    )
+    classes_label = format_classes_for_display(result.included_classes)
     lines = [
         f"Kategoria bazowa: {result.category}",
         f"Klasy: {classes_label}",
@@ -673,7 +943,9 @@ def format_ranking_report(result: RankingBuildResult) -> str:
 def build_default_output_filename(result: RankingBuildResult) -> str:
     """Tworzy domyślną nazwę pliku raportu z kategorii, klas i zakresu lat."""
     if result.included_classes:
-        classes_part = "_".join(result.included_classes)
+        classes_part = "_".join(
+            _class_for_filename(klasa) for klasa in result.included_classes
+        )
     else:
         classes_part = "wszystkie"
 
@@ -687,8 +959,78 @@ def build_default_output_filename(result: RankingBuildResult) -> str:
     return f"ranking_{result.category.lower()}_{classes_part}_{years_part}.txt"
 
 
+def build_default_progress_filename(result: ProgressExportResult) -> str:
+    """Tworzy domyślną nazwę pliku CSV z historią zmian punktów."""
+    if result.included_classes:
+        classes_part = "_".join(
+            _class_for_filename(klasa) for klasa in result.included_classes
+        )
+    else:
+        classes_part = "wszystkie"
+
+    if len(result.years) == 1:
+        years_part = str(result.years[0])
+    elif len(result.years) <= 4:
+        years_part = "_".join(str(year) for year in result.years)
+    else:
+        years_part = f"{result.years[0]}-{result.years[-1]}_{len(result.years)}lat"
+
+    return f"progress_{result.category.lower()}_{classes_part}_{years_part}.csv"
+
+
 def save_ranking_report(report_text: str, output_path: str | Path) -> Path:
     """Zapisuje gotowy raport tekstowy do wskazanego pliku."""
     path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(report_text, encoding="utf-8")
+    return path
+
+
+def save_progress_csv(
+    result: ProgressExportResult,
+    output_path: str | Path,
+    delimiter: str = ";",
+    encoding: str = "utf-8-sig",
+) -> Path:
+    """Zapisuje historię zmian punktów do pliku CSV."""
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "rok",
+        "data_turnieju",
+        "turniej",
+        "plik",
+        "kategoria_bazowa",
+        "podkategoria",
+        "klasa",
+        "lokata",
+        "para",
+        "tancerz_1",
+        "tancerz_2",
+        "punkty_przed",
+        "punkty_po",
+        "roznica_punktow",
+    ]
+
+    with path.open("w", encoding=encoding, newline="") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames, delimiter=delimiter)
+        writer.writeheader()
+        for row in result.rows:
+            writer.writerow({
+                "rok": row.year,
+                "data_turnieju": row.tournament_date,
+                "turniej": row.tournament_name,
+                "plik": row.source_file,
+                "kategoria_bazowa": row.category,
+                "podkategoria": row.exact_category,
+                "klasa": row.klasa if row.klasa else "-",
+                "lokata": row.place,
+                "para": row.pair_name,
+                "tancerz_1": row.tancerz1,
+                "tancerz_2": row.tancerz2,
+                "punkty_przed": f"{row.points_before:.2f}",
+                "punkty_po": f"{row.points_after:.2f}",
+                "roznica_punktow": f"{row.points_delta:.2f}",
+            })
+
     return path
