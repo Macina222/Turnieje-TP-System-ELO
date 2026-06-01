@@ -13,6 +13,8 @@ Kalkulator rankingu ELO dla par tanecznych na podstawie wyników turniejów tań
   - jeden lub wiele lat,
   - opcjonalnie jedną lub wiele klas/podkategorii, np. `B`, `A`, `S`, `OPEN`,
   - zapis wyniku do wskazanego pliku.
+- Osobny skrypt `progress_export.py` zapisuje do CSV historię zmian punktów par
+  po każdym turnieju: punkty przed, punkty po, różnicę i lokatę.
 - Dla kategorii bazowej zbierane są wszystkie pasujące podkategorie z plików `rsc/`, a filtr klas może zawęzić ten zestaw.
 - `main.py` nadal istnieje jako prosty, starszy skrypt liczący jeden globalny ranking ze wszystkich plików `rsc/`. Korzysta z funkcji backendu, ale nie obsługuje filtrów lat, kategorii ani klas.
 
@@ -20,6 +22,7 @@ Kalkulator rankingu ELO dla par tanecznych na podstawie wyników turniejów tań
 
 - `App.py` — aplikacja użytkowa: GUI, interaktywny tryb terminalowy i tryb CLI z argumentami.
 - `ranking_service.py` — scalony backend rankingu: model pary, wczytywanie `config.txt`, przetwarzanie pojedynczych turniejów, obliczanie zmian ELO, filtrowanie lat/kategorii/klas, budowa rankingu, formatowanie raportu i zapis wyniku.
+- `progress_export.py` — eksport CSV pokazujący postęp par turniej po turnieju.
 - `main.py` — legacy script przetwarzający całe `rsc/` i wypisujący wynik w konsoli.
 - `config.txt` — parametry algorytmu ELO: `K`, `D` oraz domyślne ELO dla klas.
 - `rsc/` — dane wejściowe, zorganizowane w podkatalogach roczników.
@@ -76,7 +79,7 @@ GUI i CLI pozwalają ograniczyć ranking do wybranych klas. Brak wyboru klas ozn
 ## Jak liczony jest ranking
 
 1. Para jest identyfikowana jako krotka `(tancerz1, tancerz2)`.
-2. Nowa para startuje z domyślnym ELO dla klasy odczytanej z nazwy pliku, np. `defaulteloB` dla klasy `B`.
+2. Nowa para startuje z domyślnym ELO dla klasy odczytanej z nazwy pliku, np. `defaulteloB` dla klasy `B`; pary z `OPEN` oraz klas innych niż `S`, `A`, `B`, `C` korzystają z `defaulteloOPEN`.
 3. W obrębie jednego pliku każda para jest porównywana z każdą inną parą.
 4. Niższa lokata oznacza zwycięstwo, wyższa porażkę, taka sama lokata remis.
 5. Oczekiwany wynik liczony jest klasycznym wzorem ELO:
@@ -93,7 +96,7 @@ efektywne_k = K / (n - 1)
 ```
 
 7. Wskaźniki `K`, `D` i domyślne ELO klas są wczytywane z pliku `config.txt` w katalogu projektu.
-8. Aktualna zawartość `config.txt` ustawia `K = 50`, `D = 250`, `C = 1000`, `B = 1100`, `A = 1200`, `S = 1300`.
+8. Aktualna zawartość `config.txt` ustawia `K = 50`, `D = 250`, `C = 1100`, `B = 1100`, `A = 1200`, `S = 1300`, `OPEN = 1000`.
 9. W `App.py` ranking jest budowany sekwencyjnie: lata rosnąco, a w obrębie roku pliki według daty z nazwy `{dd}-{mm}-...`.
 10. `main.py` korzysta z tej samej funkcji przetwarzania turnieju, ale jako legacy script nie przekazuje klas z nazw plików i traktuje wszystkie dane jako jeden globalny ranking.
 
@@ -104,10 +107,11 @@ Plik `config.txt` w katalogu głównym projektu:
 ```text
 K=50
 D=250
-defaulteloC=1000
+defaulteloC=1100
 defaulteloB=1100
 defaulteloA=1200
 defaulteloS=1300
+defaulteloOPEN=1000
 ```
 
 ## Uruchamianie
@@ -160,6 +164,54 @@ To polecenie:
 - przetwarza całe `rsc/`,
 - nie filtruje po latach, kategoriach ani klasach,
 - wypisuje wynik w konsoli.
+
+### 4. Eksport postępu par do CSV
+
+```bash
+python3 progress_export.py --category V --years 2025
+python3 progress_export.py --category V --classes B A --years 2024-2025
+python3 progress_export.py --category III --years 2022 2023 2024 --output progress_iii.csv
+python3 progress_export.py
+```
+
+Bez argumentów skrypt pyta w terminalu o lata, kategorię, opcjonalnie klasy
+i ścieżkę zapisu. Plik CSV ma domyślnie separator średnika i zawiera m.in.:
+
+- rok, datę turnieju, nazwę turnieju i plik źródłowy,
+- kategorię bazową, podkategorię i klasę,
+- lokatę pary na turnieju,
+- nazwiska tancerzy,
+- `punkty_przed`, `punkty_po` i `roznica_punktow`.
+
+### 5. Wykres ELO par z CSV postępu
+
+Wykres korzysta z CSV wygenerowanego przez `progress_export.py` i wymaga paczki
+`seaborn` oraz biblioteki rysującej `matplotlib`:
+
+```bash
+python3 -m pip install seaborn matplotlib
+```
+
+Przykłady:
+
+```bash
+python3 pair_progress_plot.py progress_v_S_OPEN_A_B_bez_sufiksu_DEBIUT_2023_2024_2025.csv --pair "Pasiut Paweł, Ziółek Weronika"
+python3 pair_progress_plot.py --input progress_v_S_OPEN_A_B_bez_sufiksu_DEBIUT_2023_2024_2025.csv --list-pairs --search "Pasiut"
+python3 pair_progress_plot.py --input progress_v_S_OPEN_A_B_bez_sufiksu_DEBIUT_2023_2024_2025.csv --pair "Pasiut Paweł, Ziółek Weronika" --output wykres_pasiut_ziolek.png
+python3 pair_progress_plot.py --input progress_v_S_OPEN_A_B_bez_sufiksu_DEBIUT_2023_2024_2025.csv --pair "Pasiut Paweł, Ziółek Weronika" --pair "Teperek Kajetan, Drzas Joanna" --output porownanie_par.png
+python3 pair_progress_plot.py --input progress_v_S_OPEN_A_B_bez_sufiksu_DEBIUT_2023_2024_2025.csv --pairs "Pasiut Paweł, Ziółek Weronika" "Teperek Kajetan, Drzas Joanna"
+```
+
+Jeśli nie podasz ścieżki CSV, skrypt użyje najnowszego pliku `progress*.csv`
+z katalogu projektu. Na osi Y pokazuje `punkty_po`, czyli ELO pary po danym
+występie, a na osi X kolejne występy pary uporządkowane chronologicznie.
+Na wykresie pojawiają się też poziome przerywane linie progów z `config.txt`
+odczytane z `defaultelo...`; `defaulteloOPEN` jest pomijany.
+Jeśli nie podasz `--output` ani `--show`, program zapyta, czy wykres pokazać,
+zapisać do pliku, czy zapisać i pokazać. `--output` zapisuje wykres do pliku;
+gdy użyjesz `--output`, okno wykresu nie otwiera się automatycznie, chyba że
+dodasz `--show`. Kilka par można nałożyć na jeden wykres przez wielokrotne
+podanie `--pair` albo przez `--pairs`.
 
 ## Raport wynikowy
 

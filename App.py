@@ -18,6 +18,7 @@ from pathlib import Path
 from ranking_service import (
     build_default_output_filename,
     build_ranking,
+    format_classes_for_display,
     format_ranking_report,
     list_available_categories_for_years,
     list_available_classes_for_category_and_years,
@@ -250,9 +251,13 @@ def run_cli_interactive(project_dir: Path) -> int:
 
     if prompt_yes_no("Zapisać ranking do pliku?", default=True):
         default_name = build_default_output_filename(result)
-        suggested_path = project_dir / default_name
+        suggested_path = project_dir / "txt" / default_name
+        suggested_path.parent.mkdir(parents=True, exist_ok=True)
         target = input(f"Ścieżka zapisu [{suggested_path}]: ").strip()
         output_path = Path(target) if target else suggested_path
+        if not output_path.is_absolute() and len(output_path.parts) == 1:
+            output_path = project_dir / "txt" / output_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         saved_path = save_ranking_report(report, output_path)
         print(f"Zapisano do: {saved_path}")
 
@@ -287,7 +292,11 @@ def run_cli_from_args(args: argparse.Namespace, project_dir: Path) -> int:
     print(report)
 
     if args.output:
-        saved_path = save_ranking_report(report, args.output)
+        output_path = Path(args.output)
+        if not output_path.is_absolute() and len(output_path.parts) == 1:
+            output_path = project_dir / "txt" / output_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        saved_path = save_ranking_report(report, output_path)
         print()
         print(f"Zapisano do: {saved_path}")
 
@@ -707,9 +716,7 @@ if tk is not None:
 
             report = format_ranking_report(result)
             included_categories = ", ".join(result.included_categories) or "brak"
-            classes_label = (
-                ", ".join(result.included_classes) if result.included_classes else "wszystkie"
-            )
+            classes_label = format_classes_for_display(result.included_classes)
 
             self.current_result = result
             self.current_report = report
@@ -740,10 +747,12 @@ if tk is not None:
                 )
                 return
 
-            default_path = self.project_dir / build_default_output_filename(self.current_result)
+            txt_dir = self.project_dir / "txt"
+            txt_dir.mkdir(parents=True, exist_ok=True)
+            default_path = txt_dir / build_default_output_filename(self.current_result)
             output_path = filedialog.asksaveasfilename(
                 title="Zapisz ranking",
-                initialdir=str(self.project_dir),
+                initialdir=str(txt_dir),
                 initialfile=default_path.name,
                 defaultextension=".txt",
                 filetypes=(("Plik tekstowy", "*.txt"), ("Wszystkie pliki", "*.*")),
