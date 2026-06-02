@@ -10,9 +10,10 @@ Rola modułu w całym systemie:
 6. dzięki temu backend z `ranking_service.py` dostaje dane wejściowe w formacie,
    który może przeliczać na ranking ELO bez dodatkowych transformacji.
 
-Domyślny wynik to `wyniki_par.csv` z kolumnami:
-`rok`, `turniej`, `turniej_id`, `kategoria`, `miejsce`, `para`, `osrodek`,
-`instruktor`.
+Domyślny wynik to `wyniki_par.csv` z preferowanymi kolumnami:
+`rok`, `turniej`, `turniej_id`, `data_turnieju`, `kategoria`, `miejsce`,
+`para`, `osrodek`, `instruktor`, `punkty`. Jeśli strona zawiera dodatkowe
+kolumny, zostają dopisane na końcu eksportu.
 """
 
 import argparse
@@ -65,6 +66,28 @@ def clean_tournament_name(raw: str) -> str:
         if line:
             return line
     return raw.strip()
+
+
+def extract_iso_date(text: str) -> str | None:
+    """Wyciąga pierwszą datę w formacie `YYYY-MM-DD` z przekazanego tekstu."""
+
+    if not text:
+        return None
+
+    match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", text)
+    return match.group(1) if match else None
+
+
+def extract_day_month_prefix(date_text: str | None) -> str:
+    """Zamienia `YYYY-MM-DD` na prefiks nazwy pliku `DD-MM`."""
+
+    if not date_text:
+        return ""
+
+    try:
+        return datetime.strptime(date_text, "%Y-%m-%d").strftime("%d-%m")
+    except ValueError:
+        return ""
 
 
 def split_pair(raw: str) -> list[str]:
@@ -190,6 +213,7 @@ def get_tournaments(page, year: str) -> list:
             "id": tid,
             "url": f"{BASE_URL}/{year}/{slug}",
             "year": year,
+            "date": extract_iso_date(text),
         })
 
     log(f"    Znaleziono {len(tournaments)} turniejów: {[t['name'] for t in tournaments]}")
@@ -223,8 +247,10 @@ def get_results(page, tournament: dict, debug: bool) -> list:
         return []
 
     if debug:
-        path = f"debug_{tournament['id']}.png"
-        page.screenshot(path=path)
+        img_dir = Path(__file__).resolve().parent.parent / "img"
+        img_dir.mkdir(parents=True, exist_ok=True)
+        path = img_dir / f"debug_{tournament['id']}.png"
+        page.screenshot(path=str(path))
         log(f"    Zrzut: {path}", "DEBUG")
 
     # Pobieramy wszystkie bloki kategorii przez JavaScript w jednym wywołaniu.
@@ -300,10 +326,48 @@ def get_results(page, tournament: dict, debug: bool) -> list:
         }
     """)
 
+    tournament_date = tournament.get("date") or page.evaluate("""
+        () => {
+            const bodyText = document.body?.innerText || '';
+            const html = document.documentElement?.outerHTML || '';
+            const patterns = [
+                /\\b(\\d{4}-\\d{2}-\\d{2})\\b/,
+                /\\b(\\d{2}\\.\\d{2}\\.\\d{4})\\b/,
+                /\\b(\\d{2}-\\d{2}-\\d{4})\\b/,
+                /\\b(\\d{4}\\/\\d{2}\\/\\d{2})\\b/,
+            ];
+
+            for (const source of [bodyText, html]) {
+                for (const pattern of patterns) {
+                    const match = source.match(pattern);
+                    if (match) {
+                        return match[1];
+                    }
+                }
+            }
+
+            return '';
+        }
+    """)
+
+    if tournament_date:
+        tournament_date = tournament_date.strip()
+        for pattern, replacement in (
+            (r"^(\\d{2})\\.(\\d{2})\\.(\\d{4})$", r"\\3-\\2-\\1"),
+            (r"^(\\d{2})-(\\d{2})-(\\d{4})$", r"\\3-\\2-\\1"),
+            (r"^(\\d{4})/(\\d{2})/(\\d{2})$", r"\\1-\\2-\\3"),
+        ):
+            tournament_date = re.sub(pattern, replacement, tournament_date)
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", tournament_date):
+            tournament_date = None
+    else:
+        tournament_date = None
+
     base = {
-        "rok":        tournament["year"],
-        "turniej":    tournament["name"],
-        "turniej_id": tournament["id"],
+        "rok":            tournament["year"],
+        "turniej":        tournament["name"],
+        "turniej_id":     tournament["id"],
+        "data_turnieju":  tournament_date or "",
     }
 
     records = []
@@ -351,7 +415,10 @@ def _normalize_col(name: str) -> str:
 # Zapis CSV
 # ──────────────────────────────────────────────────────────────
 
-PREFERRED_COLS = ["rok", "turniej", "turniej_id", "kategoria", "miejsce", "para", "osrodek", "instruktor", "punkty"]
+PREFERRED_COLS = [
+    "rok", "turniej", "turniej_id", "data_turnieju", "kategoria",
+    "miejsce", "para", "osrodek", "instruktor", "punkty"
+]
 
 
 def save_csv(records: list, output_path: str):
@@ -366,6 +433,12 @@ def save_csv(records: list, output_path: str):
         log("Brak danych do zapisania.", "WARN")
         return
 
+    project_root = Path(__file__).resolve().parent.parent
+    out_path = Path(output_path)
+    if not out_path.is_absolute() and len(out_path.parts) == 1:
+        out_path = project_root / "csv" / out_path
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
     if HAS_PANDAS:
         df = pd.DataFrame(records)
         cols = [c for c in PREFERRED_COLS if c in df.columns]
@@ -375,8 +448,8 @@ def save_csv(records: list, output_path: str):
         df = df.drop_duplicates()
         if before != len(df):
             log(f"Usunięto {before - len(df)} duplikatów.")
-        df.to_csv(output_path, index=False, encoding="utf-8-sig")
-        log(f"\nZapisano {len(df)} wierszy → {output_path}")
+        df.to_csv(out_path, index=False, encoding="utf-8-sig")
+        log(f"\nZapisano {len(df)} wierszy → {out_path}")
         log(f"Kolumny: {list(df.columns)}")
         print("\n--- Podgląd (pierwsze 10 wierszy) ---")
         print(df.head(10).to_string(index=False))
@@ -388,11 +461,11 @@ def save_csv(records: list, output_path: str):
                     all_keys.append(k)
         ordered = [k for k in PREFERRED_COLS if k in all_keys]
         ordered += [k for k in all_keys if k not in ordered]
-        with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
+        with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.DictWriter(f, fieldnames=ordered, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(records)
-        log(f"Zapisano {len(records)} wierszy → {output_path}")
+        log(f"Zapisano {len(records)} wierszy → {out_path}")
 
 
 def save_organized_data(records: list, output_dir: str = DEFAULT_RSC_DIR):
@@ -400,7 +473,7 @@ def save_organized_data(records: list, output_dir: str = DEFAULT_RSC_DIR):
     Zapisuje rekordy bezpośrednio do struktury wymaganej przez kalkulator.
 
     To najważniejszy tryb integracyjny między scraperem a rankingiem:
-    rekordy są grupowane do plików `rsc/{rok}/{turniej}-{kategoria}.txt`, dzięki
+    rekordy są grupowane do plików `rsc/{rok}/{dd-mm-turniej}-{kategoria}.txt`, dzięki
     czemu `ranking_service.py` może je od razu przeliczyć.
     """
 
@@ -408,22 +481,27 @@ def save_organized_data(records: list, output_dir: str = DEFAULT_RSC_DIR):
         log("Brak danych do zapisania w strukturze rsc.", "WARN")
         return
 
-    grouped: dict[tuple[str, str, str], list[dict]] = {}
+    grouped: dict[tuple[str, str, str, str], list[dict]] = {}
     for record in records:
         year = str(record.get("rok", "")).strip()
         tournament = str(record.get("turniej", "")).strip()
+        tournament_date = str(record.get("data_turnieju", "")).strip()
         category = str(record.get("kategoria", "")).strip()
-        key = (year, tournament, category)
+        key = (year, tournament_date, tournament, category)
         grouped.setdefault(key, []).append(record)
 
     output_root = Path(output_dir)
     files_written = 0
 
-    for (year, tournament, category), rows in sorted(grouped.items()):
+    for (year, tournament_date, tournament, category), rows in sorted(grouped.items()):
         year_dir = output_root / year
         year_dir.mkdir(parents=True, exist_ok=True)
 
-        filename = f"{tournament_filename_part(tournament)}-{category_filename_part(category)}.txt"
+        date_prefix = extract_day_month_prefix(tournament_date)
+        tournament_part = tournament_filename_part(tournament)
+        category_part = category_filename_part(category)
+        filename_parts = [part for part in [date_prefix, tournament_part] if part]
+        filename = f"{'-'.join(filename_parts)}-{category_part}.txt"
         path = year_dir / filename
 
         lines = ["Lokata;Para;Ośrodek;Instruktor"]
@@ -523,7 +601,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--year", "-y", nargs="+", metavar="ROK",
                         help="Ogranicz do wybranych lat, np. --year 2022 2023")
     parser.add_argument("--organise-data", action="store_true",
-                        help="Zapisz dane do folderu rsc/{rok}/turniej-kategoria.txt")
+                        help="Zapisz dane do folderu rsc/{rok}/dd-mm-turniej-kategoria.txt")
     return parser
 
 
