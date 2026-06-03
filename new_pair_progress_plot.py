@@ -9,9 +9,12 @@ buduje w pamięci przez new_ranking_service.build_new_progress_export.
 from __future__ import annotations
 
 import argparse
+import html
+import json
 import os
 import re
 import tempfile
+import webbrowser
 from pathlib import Path
 from typing import Iterable
 
@@ -358,6 +361,18 @@ def resolve_pair_series(
     return selections
 
 
+def build_all_pair_series(rows: list[dict[str, str]]) -> list[tuple[str, list[dict[str, str]]]]:
+    """Buduje serie dla wszystkich wykrytych par z aktualnych filtrów."""
+    selections: list[tuple[str, list[dict[str, str]]]] = []
+    for pair in unique_pairs(rows):
+        pair_rows = pair_rows_by_id(rows, pair["pair_id"]) if pair["pair_id"] else pair_rows_by_name(rows, pair["para"])
+        if not pair_rows:
+            continue
+        ordered_rows = sorted_pair_rows(pair_rows)
+        selections.append((ordered_rows[0]["para"], ordered_rows))
+    return selections
+
+
 def tournament_key(row: dict[str, str]) -> str:
     """Zwraca stabilny klucz turnieju/kategorii dla wspólnej osi X."""
     return "|".join([
@@ -431,6 +446,83 @@ def prompt_plot_output_action(
         if not output_path.is_absolute() and len(output_path.parts) == 1:
             output_path = img_dir / output_path
         return output_path, choice == "3"
+
+
+def build_default_interactive_plot_filename(
+    scope: str,
+    pair_series: list[tuple[str, list[dict[str, str]]]],
+) -> str:
+    """Buduje domyślną nazwę pliku HTML dla interaktywnego wykresu."""
+    if scope == "all":
+        return "wykres_elo_new_interaktywny_all_pairs.html"
+    if len(pair_series) == 1:
+        return (
+            "wykres_elo_new_interaktywny_"
+            f"{slugify_filename_part(pair_series[0][0])}.html"
+        )
+    return f"wykres_elo_new_interaktywny_{len(pair_series)}_par.html"
+
+
+def prompt_interactive_scope() -> str:
+    """Pyta, czy interaktywny wykres ma startować od wszystkich czy wybranych par."""
+    print()
+    print("Tryb interaktywny:")
+    print("  1. Wszystkie wykryte pary")
+    print("  2. Ręczny wybór par na start")
+
+    while True:
+        choice = input("Wybór [1/2, Enter = 1]: ").strip()
+        if not choice or choice == "1":
+            return "all"
+        if choice == "2":
+            return "selected"
+        print("Wpisz 1 albo 2.")
+
+
+def prompt_chart_mode() -> str:
+    """Pyta o rodzaj wykresu w terminalowym trybie interaktywnym."""
+    print()
+    print("Rodzaj wykresu:")
+    print("  1. Statyczny PNG/okno matplotlib")
+    print("  2. Interaktywny HTML w przeglądarce")
+
+    while True:
+        choice = input("Wybór [1/2, Enter = 2]: ").strip()
+        if not choice or choice == "2":
+            return "interactive"
+        if choice == "1":
+            return "static"
+        print("Wpisz 1 albo 2.")
+
+
+def prompt_interactive_output_action(
+    project_dir: Path,
+    scope: str,
+    pair_series: list[tuple[str, list[dict[str, str]]]],
+) -> tuple[Path, bool]:
+    """Pyta o zapis i otwarcie interaktywnego wykresu HTML."""
+    print()
+    print("Co zrobić z interaktywnym wykresem?")
+    print("  1. Zapisz HTML i otwórz w przeglądarce")
+    print("  2. Tylko zapisz HTML")
+
+    img_dir = project_dir / "img"
+    img_dir.mkdir(parents=True, exist_ok=True)
+    default_path = img_dir / build_default_interactive_plot_filename(scope, pair_series)
+
+    while True:
+        choice = input("Wybór [1/2, Enter = 1]: ").strip()
+        if choice not in {"", "1", "2"}:
+            print("Wpisz 1 albo 2.")
+            continue
+
+        raw_path = input(f"Ścieżka zapisu [{default_path}]: ").strip()
+        output_path = Path(raw_path) if raw_path else default_path
+        if not output_path.is_absolute() and len(output_path.parts) == 1:
+            output_path = img_dir / output_path
+        if output_path.suffix.lower() != ".html":
+            output_path = output_path.with_suffix(".html")
+        return output_path, choice != "2"
 
 
 def plot_pair_progress(
@@ -559,6 +651,8 @@ def plot_pair_progress(
 
     if title:
         chart_title = title
+    elif initial_scope == "all":
+        chart_title = "Historia rankingu ELO wszystkich par"
     elif len(pair_series) == 1:
         chart_title = f"Historia rankingu ELO: {pair_series[0][0]}"
     else:
@@ -599,6 +693,501 @@ def plot_pair_progress(
         plt.close(fig)
 
 
+def build_interactive_plot_data(
+    pair_series: list[tuple[str, list[dict[str, str]]]],
+    x_by_key: dict[str, int],
+    labels: list[str],
+) -> tuple[list[dict[str, object]], list[float]]:
+    """Przygotowuje serie danych dla HTML/Plotly."""
+    series_data: list[dict[str, object]] = []
+    all_y: list[float] = []
+
+    for pair_name, ordered_rows in pair_series:
+        x_values: list[int] = []
+        y_values: list[float] = []
+        custom_data: list[list[str]] = []
+        for row in ordered_rows:
+            x_value = x_by_key[tournament_key(row)]
+            y_value = parse_number(row["punkty_po"])
+            delta_value = parse_number(row["roznica_punktow"])
+            x_values.append(x_value)
+            y_values.append(y_value)
+            all_y.append(y_value)
+            custom_data.append([
+                row["para"],
+                row["turniej"],
+                row["rok"],
+                row["podkategoria"],
+                row["lokata"],
+                f"{delta_value:+.2f}",
+                f"{parse_number(row['punkty_przed']):.2f}",
+                f"{y_value:.2f}",
+                row["kod_turnieju"],
+            ])
+
+        series_data.append({
+            "name": pair_name,
+            "x": x_values,
+            "y": y_values,
+            "customdata": custom_data,
+        })
+
+    return series_data, all_y
+
+
+def write_interactive_plot_html(
+    pair_series: list[tuple[str, list[dict[str, str]]]],
+    source_path: Path,
+    config_path: Path,
+    output_path: Path,
+    title: str | None,
+    initial_scope: str,
+) -> Path:
+    """Tworzy plik HTML z interaktywnym wykresem Plotly i panelem wyboru par."""
+    if not pair_series:
+        raise ValueError("Nie wybrano żadnej pary do wykresu.")
+
+    x_by_key, labels = build_tournament_axis(pair_series)
+    series_data, all_y = build_interactive_plot_data(pair_series, x_by_key, labels)
+    thresholds = load_class_thresholds(config_path)
+    threshold_values = [value for _, value in thresholds]
+    visible_values = all_y + threshold_values
+
+    if title:
+        chart_title = title
+    elif initial_scope == "all":
+        chart_title = "Historia rankingu ELO wszystkich par"
+    elif len(pair_series) == 1:
+        chart_title = f"Historia rankingu ELO: {pair_series[0][0]}"
+    else:
+        chart_title = "Historia rankingu ELO wybranych par"
+
+    if visible_values:
+        min_value = min(visible_values)
+        max_value = max(visible_values)
+        margin = max(35.0, (max_value - min_value) * 0.06)
+        y_range = [round(min_value - margin, 2), round(max_value + margin, 2)]
+    else:
+        y_range = None
+
+    layout_shapes = []
+    layout_annotations = []
+    for class_name, value in thresholds:
+        layout_shapes.append({
+            "type": "line",
+            "xref": "paper",
+            "x0": 0,
+            "x1": 1,
+            "y0": value,
+            "y1": value,
+            "line": {
+                "color": "#9aa4ad",
+                "width": 1,
+                "dash": "dash",
+            },
+            "opacity": 0.75,
+        })
+        layout_annotations.append({
+            "xref": "paper",
+            "x": 0.01,
+            "y": value,
+            "text": f"Klasa {class_name}: {value:.0f}",
+            "showarrow": False,
+            "font": {"size": 11, "color": "#4b5563"},
+            "xanchor": "left",
+            "yanchor": "bottom",
+            "bgcolor": "rgba(255,255,255,0.78)",
+        })
+
+    hover_template = (
+        "<b>%{customdata[0]}</b><br>"
+        "Turniej: %{customdata[1]}<br>"
+        "Rok: %{customdata[2]}<br>"
+        "Podkategoria: %{customdata[3]}<br>"
+        "Miejsce: %{customdata[4]}<br>"
+        "Zmiana ELO: %{customdata[5]}<br>"
+        "ELO przed: %{customdata[6]}<br>"
+        "ELO po: %{customdata[7]}<br>"
+        "<extra></extra>"
+    )
+
+    html_payload = {
+        "series": series_data,
+        "labels": labels,
+        "thresholds": thresholds,
+        "title": chart_title,
+        "sourceName": source_path.name,
+        "yRange": y_range,
+        "initialScope": initial_scope,
+        "hoverTemplate": hover_template,
+        "layoutShapes": layout_shapes,
+        "layoutAnnotations": layout_annotations,
+    }
+
+    document = f"""<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{html.escape(chart_title)}</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    :root {{
+      color-scheme: light;
+      --bg: #f4f1ea;
+      --panel: #fffdf8;
+      --line: #d8d1c4;
+      --ink: #1f2933;
+      --muted: #5b6470;
+      --accent: #0f766e;
+      --accent-soft: rgba(15, 118, 110, 0.12);
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.10), transparent 28%),
+        linear-gradient(180deg, #faf7f2 0%, var(--bg) 100%);
+    }}
+    .app {{
+      display: grid;
+      grid-template-columns: minmax(280px, 360px) 1fr;
+      gap: 18px;
+      min-height: 100vh;
+      padding: 18px;
+    }}
+    .panel, .chart-shell {{
+      background: rgba(255, 253, 248, 0.92);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 12px 36px rgba(31, 41, 51, 0.08);
+      backdrop-filter: blur(10px);
+    }}
+    .panel {{
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }}
+    h1 {{
+      margin: 0;
+      font-size: 1.15rem;
+      line-height: 1.3;
+    }}
+    .meta {{
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.5;
+    }}
+    .controls {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }}
+    button {{
+      border: 1px solid var(--line);
+      background: white;
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 9px 12px;
+      cursor: pointer;
+      font: inherit;
+    }}
+    button:hover {{
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }}
+    input[type="search"] {{
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      font: inherit;
+      background: white;
+    }}
+    .pair-list {{
+      overflow: auto;
+      min-height: 260px;
+      max-height: 56vh;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding-right: 6px;
+    }}
+    .pair-item {{
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 11px;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.76);
+    }}
+    .pair-item:hover {{
+      border-color: var(--line);
+    }}
+    .pair-item span {{
+      font-size: 0.93rem;
+      line-height: 1.35;
+    }}
+    .pair-count {{
+      display: inline-block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }}
+    .chart-shell {{
+      padding: 10px 10px 2px 10px;
+      min-width: 0;
+    }}
+    #chart {{
+      width: 100%;
+      height: calc(100vh - 48px);
+      min-height: 620px;
+    }}
+    .hint {{
+      color: var(--muted);
+      font-size: 0.87rem;
+      line-height: 1.5;
+    }}
+    @media (max-width: 980px) {{
+      .app {{
+        grid-template-columns: 1fr;
+      }}
+      .pair-list {{
+        max-height: 34vh;
+      }}
+      #chart {{
+        height: 72vh;
+        min-height: 520px;
+      }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="panel">
+      <div>
+        <h1>{html.escape(chart_title)}</h1>
+        <div class="meta">
+          Źródło: {html.escape(source_path.name)}<br>
+          Pary: <span id="visible-count">0</span> / <span id="total-count">0</span>
+        </div>
+      </div>
+      <div class="controls">
+        <button type="button" id="show-all">Pokaż wszystkie</button>
+        <button type="button" id="hide-all">Ukryj wszystkie</button>
+        <button type="button" id="reset-view">Reset widoku</button>
+      </div>
+      <input id="search" type="search" placeholder="Filtruj pary po nazwie...">
+      <div id="pair-list" class="pair-list"></div>
+      <div class="hint">
+        Zoom: kółko myszy lub zaznaczenie obszaru. Przesuwanie: przeciągnij wykres.
+        Kliknięcie legendy także ukrywa/pokazuje linię.
+      </div>
+    </aside>
+    <main class="chart-shell">
+      <div id="chart"></div>
+    </main>
+  </div>
+  <script>
+    const payload = {json.dumps(html_payload, ensure_ascii=False)};
+    const chartEl = document.getElementById("chart");
+    const pairListEl = document.getElementById("pair-list");
+    const searchEl = document.getElementById("search");
+    const visibleCountEl = document.getElementById("visible-count");
+    const totalCountEl = document.getElementById("total-count");
+    const traces = payload.series.map((serie, index) => ({{
+      type: "scatter",
+      mode: "lines+markers",
+      name: serie.name,
+      x: serie.x,
+      y: serie.y,
+      customdata: serie.customdata,
+      hovertemplate: payload.hoverTemplate,
+      line: {{ width: 2.4 }},
+      marker: {{ size: 8 }},
+      visible: true,
+    }}));
+
+    const layout = {{
+      title: {{ text: payload.title, x: 0.02 }},
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(255,255,255,0.84)",
+      hovermode: "closest",
+      margin: {{ l: 70, r: 30, t: 70, b: 130 }},
+      xaxis: {{
+        title: "Turnieje chronologicznie",
+        tickmode: "array",
+        tickvals: payload.labels.map((_, index) => index + 1),
+        ticktext: payload.labels,
+        tickangle: -35,
+        showgrid: true,
+        gridcolor: "rgba(148, 163, 184, 0.16)",
+      }},
+      yaxis: {{
+        title: "Ranking ELO",
+        range: payload.yRange,
+        zeroline: false,
+        showgrid: true,
+        gridcolor: "rgba(148, 163, 184, 0.18)",
+      }},
+      shapes: payload.layoutShapes,
+      annotations: payload.layoutAnnotations,
+      legend: {{
+        orientation: "h",
+        yanchor: "bottom",
+        y: 1.02,
+        xanchor: "left",
+        x: 0,
+      }},
+    }};
+
+    const config = {{
+      responsive: true,
+      displaylogo: false,
+      toImageButtonOptions: {{
+        format: "png",
+        filename: "wykres_elo_interaktywny",
+        scale: 2,
+      }},
+    }};
+
+    const checkboxByIndex = new Map();
+
+    function syncCounts() {{
+      let visible = 0;
+      traces.forEach((trace) => {{
+        if (trace.visible !== "legendonly") {{
+          visible += 1;
+        }}
+      }});
+      visibleCountEl.textContent = String(visible);
+      totalCountEl.textContent = String(traces.length);
+    }}
+
+    function renderPairList(filterText = "") {{
+      const normalizedFilter = filterText.trim().toLocaleLowerCase();
+      pairListEl.innerHTML = "";
+      traces.forEach((trace, index) => {{
+        if (normalizedFilter && !trace.name.toLocaleLowerCase().includes(normalizedFilter)) {{
+          return;
+        }}
+
+        const row = document.createElement("label");
+        row.className = "pair-item";
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = trace.visible !== "legendonly";
+        checkbox.addEventListener("change", () => setTraceVisibility(index, checkbox.checked));
+        checkboxByIndex.set(index, checkbox);
+
+        const content = document.createElement("span");
+        content.innerHTML = `${{escapeHtml(trace.name)}}<span class="pair-count">Występy: ${{trace.x.length}}</span>`;
+
+        row.appendChild(checkbox);
+        row.appendChild(content);
+        pairListEl.appendChild(row);
+      }});
+      syncCounts();
+    }}
+
+    function escapeHtml(text) {{
+      return text
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }}
+
+    function setTraceVisibility(index, visible) {{
+      traces[index].visible = visible ? true : "legendonly";
+      Plotly.restyle(chartEl, {{ visible: traces[index].visible }}, [index]);
+      const checkbox = checkboxByIndex.get(index);
+      if (checkbox) {{
+        checkbox.checked = visible;
+      }}
+      syncCounts();
+    }}
+
+    function setAllVisibility(visible) {{
+      traces.forEach((trace, index) => {{
+        trace.visible = visible ? true : "legendonly";
+        const checkbox = checkboxByIndex.get(index);
+        if (checkbox) {{
+          checkbox.checked = visible;
+        }}
+      }});
+      Plotly.restyle(chartEl, {{ visible: visible ? true : "legendonly" }});
+      syncCounts();
+    }}
+
+    Plotly.newPlot(chartEl, traces, layout, config).then(() => {{
+      totalCountEl.textContent = String(traces.length);
+      renderPairList();
+    }});
+
+    chartEl.on("plotly_restyle", () => {{
+      traces.forEach((trace, index) => {{
+        const fullTrace = chartEl.data[index];
+        trace.visible = fullTrace.visible === undefined ? true : fullTrace.visible;
+        const checkbox = checkboxByIndex.get(index);
+        if (checkbox) {{
+          checkbox.checked = trace.visible !== "legendonly";
+        }}
+      }});
+      syncCounts();
+    }});
+
+    document.getElementById("show-all").addEventListener("click", () => setAllVisibility(true));
+    document.getElementById("hide-all").addEventListener("click", () => setAllVisibility(false));
+    document.getElementById("reset-view").addEventListener("click", () => Plotly.relayout(chartEl, {{
+      "xaxis.autorange": true,
+      "yaxis.autorange": true,
+    }}));
+    searchEl.addEventListener("input", (event) => renderPairList(event.target.value));
+  </script>
+</body>
+</html>
+"""
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(document, encoding="utf-8")
+    return output_path
+
+
+def open_interactive_plot_in_browser(output_path: Path) -> None:
+    """Otwiera wygenerowany plik HTML w domyślnej przeglądarce."""
+    opened = webbrowser.open(output_path.resolve().as_uri())
+    if not opened:
+        print(f"Nie udało się automatycznie otworzyć przeglądarki. Otwórz ręcznie: {output_path}")
+
+
+def render_interactive_plot(
+    pair_series: list[tuple[str, list[dict[str, str]]]],
+    source_path: Path,
+    config_path: Path,
+    output_path: Path,
+    open_in_browser: bool,
+    title: str | None,
+    initial_scope: str,
+) -> None:
+    """Zapisuje interaktywny wykres HTML i opcjonalnie otwiera go w przeglądarce."""
+    saved_path = write_interactive_plot_html(
+        pair_series=pair_series,
+        source_path=source_path,
+        config_path=config_path,
+        output_path=output_path,
+        title=title,
+        initial_scope=initial_scope,
+    )
+    print(f"Zapisano interaktywny wykres: {saved_path}")
+    if open_in_browser:
+        open_interactive_plot_in_browser(saved_path)
+
+
 def resolve_output_mode(
     args: argparse.Namespace,
     project_dir: Path,
@@ -613,6 +1202,26 @@ def resolve_output_mode(
         return output_path, show_plot
 
     return prompt_plot_output_action(pair_series, project_dir)
+
+
+def resolve_interactive_output_mode(
+    args: argparse.Namespace,
+    project_dir: Path,
+    pair_series: list[tuple[str, list[dict[str, str]]]],
+    scope: str,
+) -> tuple[Path, bool]:
+    """Ustala zapis i otwieranie dla interaktywnego wykresu HTML."""
+    if args.output or args.show:
+        output_path = Path(args.output) if args.output else (
+            project_dir / "img" / build_default_interactive_plot_filename(scope, pair_series)
+        )
+        if not output_path.is_absolute() and len(output_path.parts) == 1:
+            output_path = project_dir / "img" / output_path
+        if output_path.suffix.lower() != ".html":
+            output_path = output_path.with_suffix(".html")
+        return output_path, args.show or not args.output
+
+    return prompt_interactive_output_action(project_dir, scope, pair_series)
 
 
 def resolve_filters_from_args(
@@ -691,6 +1300,36 @@ def run_interactive(project_dir: Path, xlsx_path: Path) -> int:
         f"klasy: {format_classes_for_display(selected_classes or [])}"
     )
 
+    chart_mode = prompt_chart_mode()
+    if chart_mode == "interactive":
+        interactive_scope = prompt_interactive_scope()
+        if interactive_scope == "all":
+            pair_series = build_all_pair_series(rows)
+        else:
+            selected_pairs = choose_pairs_interactively(rows)
+            pair_series = resolve_pair_series(
+                rows=rows,
+                pair_names=selected_pairs,
+                pair_ids=[],
+                dancer_1=None,
+                dancer_2=None,
+            )
+        output_path, open_in_browser = prompt_interactive_output_action(
+            project_dir,
+            interactive_scope,
+            pair_series,
+        )
+        render_interactive_plot(
+            pair_series=pair_series,
+            source_path=xlsx_path,
+            config_path=project_dir / "config.txt",
+            output_path=output_path,
+            open_in_browser=open_in_browser,
+            title=None,
+            initial_scope=interactive_scope,
+        )
+        return 0
+
     selected_pairs = choose_pairs_interactively(rows)
     pair_series = resolve_pair_series(
         rows=rows,
@@ -746,32 +1385,52 @@ def run_from_args(args: argparse.Namespace, project_dir: Path) -> int:
         print_pairs(pairs, limit=max(args.limit, 1))
         return 0
 
-    pair_series = resolve_pair_series(
-        rows=rows,
-        pair_names=requested_pairs,
-        pair_ids=requested_pair_ids,
-        dancer_1=args.tancerz1,
-        dancer_2=args.tancerz2,
-    )
-    if not pair_series:
-        selected_pairs = choose_pairs_interactively(rows)
+    if args.interactive and args.interactive_scope == "all":
+        pair_series = build_all_pair_series(rows)
+    else:
         pair_series = resolve_pair_series(
             rows=rows,
-            pair_names=selected_pairs,
-            pair_ids=[],
-            dancer_1=None,
-            dancer_2=None,
+            pair_names=requested_pairs,
+            pair_ids=requested_pair_ids,
+            dancer_1=args.tancerz1,
+            dancer_2=args.tancerz2,
         )
+        if not pair_series:
+            selected_pairs = choose_pairs_interactively(rows)
+            pair_series = resolve_pair_series(
+                rows=rows,
+                pair_names=selected_pairs,
+                pair_ids=[],
+                dancer_1=None,
+                dancer_2=None,
+            )
 
-    output_path, show_plot = resolve_output_mode(args, project_dir, pair_series)
-    plot_pair_progress(
-        pair_series=pair_series,
-        source_path=xlsx_path,
-        config_path=project_dir / "config.txt",
-        output_path=output_path,
-        show_plot=show_plot,
-        title=args.title,
-    )
+    if args.interactive:
+        output_path, open_in_browser = resolve_interactive_output_mode(
+            args,
+            project_dir,
+            pair_series,
+            args.interactive_scope,
+        )
+        render_interactive_plot(
+            pair_series=pair_series,
+            source_path=xlsx_path,
+            config_path=project_dir / "config.txt",
+            output_path=output_path,
+            open_in_browser=open_in_browser,
+            title=args.title,
+            initial_scope=args.interactive_scope,
+        )
+    else:
+        output_path, show_plot = resolve_output_mode(args, project_dir, pair_series)
+        plot_pair_progress(
+            pair_series=pair_series,
+            source_path=xlsx_path,
+            config_path=project_dir / "config.txt",
+            output_path=output_path,
+            show_plot=show_plot,
+            title=args.title,
+        )
     return 0
 
 
@@ -843,7 +1502,18 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--show",
         action="store_true",
-        help="Pokaż okno wykresu także wtedy, gdy użyto --output.",
+        help="Pokaż wynik po wygenerowaniu: okno matplotlib albo otwarcie HTML w przeglądarce.",
+    )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Wygeneruj interaktywny wykres HTML z zoomem, hoverem i wyborem par.",
+    )
+    parser.add_argument(
+        "--interactive-scope",
+        choices=("selected", "all"),
+        default="selected",
+        help="Dla --interactive: start od wybranych par albo od wszystkich wykrytych. Domyślnie selected.",
     )
     parser.add_argument(
         "--title",
@@ -873,6 +1543,7 @@ def main() -> None:
         or args.list_pairs
         or args.output
         or args.show
+        or args.interactive
         or args.search
     )
 
