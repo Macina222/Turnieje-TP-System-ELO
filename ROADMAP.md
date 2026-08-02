@@ -1,18 +1,27 @@
 # Roadmap
 
-## ✅ Działające:
-- Kalkulator ELO dla wielu par
-- Wizualizacja rankingu
-- Zapis rankingu do pliku txt
-- Web-scraper do budowy podstawowej bazy danych wyników (dane spójne z archiwum TTP w latach 2007-2025)
-- Ranking działający na nowych danych (oficjalnych danych TTP od roku 2021)
-- Wizualizacja formy Pary w formie wykresu rankingowego
-- Kalkulator działający na id pary, co eliminuje pomyłki i literówki
+## Done
 
-## 🚧 W trakcie
-- Ulepszenie GUI (ETA: TBD)
-- Konsultacje z Komisją ds. tańców polskich odnośnie do kierunku rozwoju projektu
+- Kalkulator ELO dla wielu par.
+- Ranking na oficjalnym formacie `data_new.xlsx`.
+- Glowne `App.py` podpiete do `new_ranking_service.py`.
+- GUI/CLI z filtrami sezonow, kategorii i klas.
+- Wybor innego pliku XLSX w GUI oraz przez `--input-excel`.
+- Zapis raportu rankingu do `txt/`.
+- Eksport historii zmian punktow do CSV przez `new_progress_export.py`.
+- Wykres historii ELO par przez `new_pair_progress_plot.py`.
+- Identyfikacja par przez `pair id`.
+- Podstawowe testy regresyjne nowego backendu.
 
-## 📋 Zaplanowane
-- Pełna integracja z systemem CIOFF (ETA: TBD)
-- Wprowadzenie roku pilotażowego w oficjalnych rozgrywkach TTP PS CIOFF (ETA: TBD)
+## In Progress
+
+- Ulepszenie ergonomii GUI.
+- Konsultacje z Komisja ds. tancow polskich odnosnie kierunku rozwoju projektu.
+- Porzadkowanie starej sciezki `rsc/` jako legacy.
+
+## Planned
+
+- Pelna integracja z systemem CIOFF.
+- Stabilny import oficjalnych danych do SQLite lub innego docelowego magazynu.
+- Rok pilotazowy w oficjalnych rozgrywkach TTP PS CIOFF.
+- Szersze testy porownujace wyniki XLSX, CSV progress i ewentualny backend SQLite.

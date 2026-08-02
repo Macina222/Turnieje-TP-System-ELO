@@ -1,5 +1,8 @@
 """
-Backend rankingu ELO dla par tańców polskich.
+Legacy backend rankingu ELO dla par tancow polskich.
+
+Ten modul obsluguje poprzedni przeplyw oparty o katalog `rsc/`. Aktualna
+sciezka aplikacji korzysta z `new_ranking_service.py` i `data_new.xlsx`.
 
 Przepływ systemu w tym module wygląda następująco:
 1. `load_ranking_config` odczytuje parametry K i D z `config.txt`.

@@ -2,9 +2,9 @@
 Punkt wejścia aplikacji rankingu ELO.
 
 Ten moduł spina warstwę użytkownika z backendem obliczeniowym:
-1. odczytuje dostępne lata i kategorie z katalogu `rsc/`,
+1. odczytuje dostępne lata, kategorie i klasy z `data_new.xlsx`,
 2. pozwala wybrać filtry w GUI albo CLI,
-3. przekazuje wybór do `ranking_service.build_ranking`,
+3. przekazuje wybór do `new_ranking_service.build_new_ranking`,
 4. odbiera gotowy raport i pokazuje go w oknie lub konsoli,
 5. opcjonalnie zapisuje raport do pliku tekstowego.
 """
@@ -14,13 +14,18 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from ranking_service import (
-    build_default_output_filename,
-    build_ranking,
-    format_ranking_report,
-    list_available_categories_for_years,
-    list_available_years,
-    save_ranking_report,
+from new_ranking_service import (
+    build_default_new_output_filename,
+    build_new_ranking,
+    format_class_for_display,
+    format_new_ranking_report,
+    list_available_categories_for_years_xlsx,
+    list_available_classes_for_category_and_years_xlsx,
+    list_available_years_xlsx,
+    load_xlsx_data,
+    parse_classes_text,
+    run_cli_from_args as run_new_cli_from_args,
+    save_new_ranking_report,
 )
 
 try:
@@ -134,6 +139,22 @@ def prompt_for_category(categories: list[str]) -> str:
     return prompt_until_valid("Kategoria (numer lub symbol): ", parse_category)
 
 
+def prompt_for_classes(available_classes: list[str]) -> list[str] | None:
+    """Pozwala opcjonalnie zawęzić ranking do wybranych klas."""
+
+    if not available_classes:
+        return None
+
+    print("Dostępne klasy:")
+    for index, klasa in enumerate(available_classes, start=1):
+        print(f"{index}. {format_class_for_display(klasa)}")
+    print("Wpisz np. B,A albo 1,2 albo all")
+    return prompt_until_valid(
+        "Klasy do uwzględnienia (Enter lub all = wszystkie): ",
+        lambda value: parse_classes_text(value, available_classes),
+    )
+
+
 def prompt_yes_no(prompt: str, default: bool = True) -> bool:
     """Obsługuje pytanie typu tak/nie z domyślną odpowiedzią."""
 
@@ -156,77 +177,73 @@ def run_cli_interactive(project_dir: Path) -> int:
     5. opcjonalnie zapisz wynik do pliku.
     """
 
-    rsc_dir = project_dir / "rsc"
-    available_years = list_available_years(rsc_dir)
+    xlsx_path = project_dir / "data_new.xlsx"
+    if not xlsx_path.is_file():
+        raise FileNotFoundError(f"Nie znaleziono pliku: {xlsx_path}")
+
+    print(f"Plik danych: {xlsx_path}")
+    df = load_xlsx_data(xlsx_path)
+    available_years = list_available_years_xlsx(df)
 
     if not available_years:
-        print("Nie znaleziono katalogów z latami w folderze rsc.")
+        print("Nie znaleziono żadnych sezonów w pliku.")
         return 1
 
     selected_years = prompt_for_years(available_years)
-    categories = list_available_categories_for_years(rsc_dir, selected_years)
+    categories = list_available_categories_for_years_xlsx(df, selected_years)
     if not categories:
         print("Brak kategorii dla wybranych lat.")
         return 1
 
     selected_category = prompt_for_category(categories)
-    result = build_ranking(selected_category, selected_years, rsc_dir)
-    report = format_ranking_report(result)
+    available_classes = list_available_classes_for_category_and_years_xlsx(
+        df,
+        selected_category,
+        selected_years,
+    )
+    selected_classes = prompt_for_classes(available_classes)
+    result = build_new_ranking(
+        file_path=xlsx_path,
+        category=selected_category,
+        years=selected_years,
+        classes=selected_classes,
+    )
+    report = format_new_ranking_report(result)
 
     print()
     print(report)
     print()
 
     if prompt_yes_no("Zapisać ranking do pliku?", default=True):
-        default_name = build_default_output_filename(result)
-        suggested_path = project_dir / default_name
+        default_name = build_default_new_output_filename(result)
+        suggested_path = project_dir / "txt" / default_name
         target = input(
             f"Ścieżka zapisu [{suggested_path}]: "
         ).strip()
         output_path = Path(target) if target else suggested_path
-        saved_path = save_ranking_report(report, output_path)
+        if not output_path.is_absolute() and len(output_path.parts) == 1:
+            output_path = project_dir / "txt" / output_path
+        saved_path = save_new_ranking_report(report, output_path)
         print(f"Zapisano do: {saved_path}")
 
     return 0
 
 
 def run_cli_from_args(args: argparse.Namespace, project_dir: Path) -> int:
-    """
-    Obsługuje nieinteraktywny tryb CLI uruchamiany przez argumenty.
+    """Obsługuje nieinteraktywny tryb CLI przez backend nowego formatu."""
 
-    Ten wariant zakłada, że użytkownik podał kategorię, a lata są przekazywane
-    przez `--years` albo domyślnie obejmują cały dostępny zakres.
-    """
-
-    rsc_dir = project_dir / "rsc"
-    available_years = list_available_years(rsc_dir)
-
-    if not available_years:
-        raise SystemExit("Nie znaleziono katalogów z latami w folderze rsc.")
-    if not args.category:
-        raise SystemExit("Podaj kategorię przez --category albo uruchom tryb interaktywny.")
-
-    selected_years = parse_year_arguments(args.years, available_years)
-    selected_category = args.category.strip().upper()
-    report = format_ranking_report(
-        build_ranking(selected_category, selected_years, rsc_dir)
-    )
-
-    print(report)
-
-    if args.output:
-        saved_path = save_ranking_report(report, args.output)
-        print()
-        print(f"Zapisano do: {saved_path}")
-
-    return 0
+    return run_new_cli_from_args(args, project_dir)
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
     """Buduje parser argumentów współdzielony przez GUI i tryb terminalowy."""
 
     parser = argparse.ArgumentParser(
-        description="Kalkulator rankingu ELO dla plików rsc."
+        description="Kalkulator rankingu ELO dla data_new.xlsx."
+    )
+    parser.add_argument(
+        "--input-excel",
+        help="Ścieżka pliku xlsx. Domyślnie: data_new.xlsx.",
     )
     parser.add_argument(
         "--category",
@@ -238,8 +255,23 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Lata lub zakresy lat, np. 2024 2025 albo 2021-2025.",
     )
     parser.add_argument(
+        "--classes",
+        nargs="+",
+        help="Klasy do uwzględnienia, np. B A albo S. Brak = wszystkie.",
+    )
+    parser.add_argument(
         "--output",
-        help="Opcjonalna ścieżka pliku wyjściowego.",
+        help="Opcjonalna ścieżka pliku wyjściowego dla jednej kategorii.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="txt",
+        help="Katalog wyjściowy dla --all-categories. Domyślnie: txt.",
+    )
+    parser.add_argument(
+        "--all-categories",
+        action="store_true",
+        help="Wygeneruj raporty dla wszystkich kategorii dostępnych w latach.",
     )
     parser.add_argument(
         "--cli",
@@ -268,12 +300,19 @@ if tk is not None:
             self.minsize(980, 640)
 
             self.project_dir = Path(__file__).resolve().parent
-            self.rsc_dir = self.project_dir / "rsc"
-            self.available_years = list_available_years(self.rsc_dir)
+            self.xlsx_path = self.project_dir / "data_new.xlsx"
+            self.data_frame = load_xlsx_data(self.xlsx_path) if self.xlsx_path.is_file() else None
+            self.available_years = (
+                list_available_years_xlsx(self.data_frame)
+                if self.data_frame is not None
+                else []
+            )
             self.current_result = None
             self.current_report = ""
+            self.available_classes: list[str] = []
 
             self.category_var = tk.StringVar()
+            self.source_var = tk.StringVar(value=str(self.xlsx_path))
             self.status_var = tk.StringVar(
                 value="Wybierz kategorię i lata, a następnie kliknij \"Oblicz ranking\"."
             )
@@ -291,7 +330,7 @@ if tk is not None:
 
             if not self.available_years:
                 self.calculate_button.state(["disabled"])
-                self.status_var.set("Nie znaleziono katalogów z latami w folderze rsc.")
+                self.status_var.set("Nie znaleziono sezonów w data_new.xlsx.")
 
         def _build_ui(self) -> None:
             """Buduje layout okna: filtry po lewej, raport i status po prawej."""
@@ -317,8 +356,26 @@ if tk is not None:
             filters_frame.grid(row=0, column=0, sticky="new")
             filters_frame.columnconfigure(0, weight=1)
 
-            ttk.Label(filters_frame, text="Kategoria rankingu").grid(
+            ttk.Label(filters_frame, text="Plik danych").grid(
                 row=0, column=0, sticky="w"
+            )
+            source_frame = ttk.Frame(filters_frame)
+            source_frame.grid(row=1, column=0, sticky="ew", pady=(4, 12))
+            source_frame.columnconfigure(0, weight=1)
+            ttk.Entry(
+                source_frame,
+                textvariable=self.source_var,
+                state="readonly",
+                width=32,
+            ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+            ttk.Button(
+                source_frame,
+                text="Wybierz...",
+                command=self._choose_xlsx_file,
+            ).grid(row=0, column=1, sticky="e")
+
+            ttk.Label(filters_frame, text="Kategoria rankingu").grid(
+                row=2, column=0, sticky="w"
             )
             self.category_combobox = ttk.Combobox(
                 filters_frame,
@@ -326,15 +383,15 @@ if tk is not None:
                 state="readonly",
                 width=20,
             )
-            self.category_combobox.grid(row=1, column=0, sticky="ew", pady=(4, 12))
-            self.category_combobox.bind("<<ComboboxSelected>>", self._on_filter_changed)
+            self.category_combobox.grid(row=3, column=0, sticky="ew", pady=(4, 12))
+            self.category_combobox.bind("<<ComboboxSelected>>", self._on_category_changed)
 
             ttk.Label(filters_frame, text="Lata uwzględniane w kalkulacji").grid(
-                row=2, column=0, sticky="w"
+                row=4, column=0, sticky="w"
             )
 
             years_frame = ttk.Frame(filters_frame)
-            years_frame.grid(row=3, column=0, sticky="nsew", pady=(4, 12))
+            years_frame.grid(row=5, column=0, sticky="nsew", pady=(4, 12))
             years_frame.columnconfigure(0, weight=1)
             years_frame.rowconfigure(0, weight=1)
 
@@ -342,7 +399,7 @@ if tk is not None:
                 years_frame,
                 selectmode=tk.EXTENDED,
                 exportselection=False,
-                height=16,
+                height=10,
                 width=18,
             )
             self.years_listbox.grid(row=0, column=0, sticky="nsew")
@@ -358,7 +415,7 @@ if tk is not None:
                 self.years_listbox.insert(tk.END, year)
 
             years_buttons = ttk.Frame(filters_frame)
-            years_buttons.grid(row=4, column=0, sticky="ew")
+            years_buttons.grid(row=6, column=0, sticky="ew")
             years_buttons.columnconfigure(0, weight=1)
             years_buttons.columnconfigure(1, weight=1)
 
@@ -367,6 +424,46 @@ if tk is not None:
             ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
             ttk.Button(
                 years_buttons, text="Wyczyść wybór", command=self._clear_years_selection
+            ).grid(row=0, column=1, sticky="ew")
+
+            ttk.Label(filters_frame, text="Klasy").grid(
+                row=7, column=0, sticky="w", pady=(12, 0)
+            )
+            classes_frame = ttk.Frame(filters_frame)
+            classes_frame.grid(row=8, column=0, sticky="nsew", pady=(4, 12))
+            classes_frame.columnconfigure(0, weight=1)
+            classes_frame.rowconfigure(0, weight=1)
+
+            self.classes_listbox = tk.Listbox(
+                classes_frame,
+                selectmode=tk.EXTENDED,
+                exportselection=False,
+                height=7,
+                width=18,
+            )
+            self.classes_listbox.grid(row=0, column=0, sticky="nsew")
+            self.classes_listbox.bind("<<ListboxSelect>>", self._on_filter_changed)
+
+            classes_scroll = ttk.Scrollbar(
+                classes_frame, orient="vertical", command=self.classes_listbox.yview
+            )
+            classes_scroll.grid(row=0, column=1, sticky="ns")
+            self.classes_listbox.configure(yscrollcommand=classes_scroll.set)
+
+            classes_buttons = ttk.Frame(filters_frame)
+            classes_buttons.grid(row=9, column=0, sticky="ew")
+            classes_buttons.columnconfigure(0, weight=1)
+            classes_buttons.columnconfigure(1, weight=1)
+
+            ttk.Button(
+                classes_buttons,
+                text="Zaznacz wszystkie",
+                command=self._select_all_classes,
+            ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+            ttk.Button(
+                classes_buttons,
+                text="Wyczyść wybór",
+                command=self._clear_classes_selection,
             ).grid(row=0, column=1, sticky="ew")
 
             actions_frame = ttk.Frame(sidebar)
@@ -444,6 +541,53 @@ if tk is not None:
                 for index in self.years_listbox.curselection()
             ]
 
+        def _get_selected_classes(self) -> list[str] | None:
+            """Odczytuje zaznaczone klasy; brak zaznaczenia oznacza wszystkie."""
+
+            classes = [
+                self.available_classes[index]
+                for index in self.classes_listbox.curselection()
+            ]
+            return classes if classes else None
+
+        def _reload_xlsx_data(self, xlsx_path: Path) -> None:
+            """Wczytuje wybrany arkusz i odświeża filtry zależne od danych."""
+
+            self.xlsx_path = xlsx_path
+            self.data_frame = load_xlsx_data(self.xlsx_path)
+            self.available_years = list_available_years_xlsx(self.data_frame)
+            self.source_var.set(str(self.xlsx_path))
+
+            self.years_listbox.delete(0, tk.END)
+            for year in self.available_years:
+                self.years_listbox.insert(tk.END, year)
+
+            if self.available_years:
+                self.calculate_button.state(["!disabled"])
+                self._select_all_years()
+                self.status_var.set("Wczytano plik danych. Kliknij \"Oblicz ranking\".")
+            else:
+                self.calculate_button.state(["disabled"])
+                self._refresh_category_choices()
+                self.status_var.set("Nie znaleziono sezonów w wybranym pliku.")
+            self._mark_result_stale()
+
+        def _choose_xlsx_file(self) -> None:
+            """Pozwala wybrać inny plik XLSX jako źródło danych."""
+
+            selected_path = filedialog.askopenfilename(
+                title="Wybierz plik XLSX z danymi",
+                initialdir=str(self.project_dir),
+                filetypes=(("Arkusz Excel", "*.xlsx"), ("Wszystkie pliki", "*.*")),
+            )
+            if not selected_path:
+                return
+
+            try:
+                self._reload_xlsx_data(Path(selected_path))
+            except Exception as exc:
+                messagebox.showerror("Błąd wczytywania danych", str(exc))
+
         def _set_result_text(self, content: str) -> None:
             """Podmienia zawartość pola tekstowego z raportem."""
 
@@ -458,6 +602,7 @@ if tk is not None:
             if self.available_years:
                 self.years_listbox.selection_set(0, tk.END)
             self._refresh_category_choices()
+            self._refresh_class_choices()
             self._mark_result_stale()
 
         def _clear_years_selection(self) -> None:
@@ -465,17 +610,38 @@ if tk is not None:
 
             self.years_listbox.selection_clear(0, tk.END)
             self._refresh_category_choices()
+            self._refresh_class_choices()
             self._mark_result_stale()
 
         def _on_year_selection_change(self, _event: tk.Event | None = None) -> None:
             """Reaguje na zmianę lat przez odświeżenie listy kategorii."""
 
             self._refresh_category_choices()
+            self._refresh_class_choices()
             self._mark_result_stale()
 
         def _on_filter_changed(self, _event: tk.Event | None = None) -> None:
             """Oznacza poprzedni wynik jako nieaktualny po zmianie filtra."""
 
+            self._mark_result_stale()
+
+        def _on_category_changed(self, _event: tk.Event | None = None) -> None:
+            """Odświeża klasy po zmianie kategorii."""
+
+            self._refresh_class_choices()
+            self._mark_result_stale()
+
+        def _select_all_classes(self) -> None:
+            """Zaznacza wszystkie dostępne klasy."""
+
+            if self.classes_listbox.size():
+                self.classes_listbox.selection_set(0, tk.END)
+            self._mark_result_stale()
+
+        def _clear_classes_selection(self) -> None:
+            """Czyści filtr klas; backend potraktuje to jako wszystkie klasy."""
+
+            self.classes_listbox.selection_clear(0, tk.END)
             self._mark_result_stale()
 
         def _refresh_category_choices(self) -> None:
@@ -487,9 +653,12 @@ if tk is not None:
             """
 
             years = self._get_selected_years()
-            categories = list_available_categories_for_years(
-                self.rsc_dir, years if years else None
-            )
+            if self.data_frame is None:
+                categories = []
+            else:
+                categories = list_available_categories_for_years_xlsx(
+                    self.data_frame, years if years else None
+                )
 
             current_category = self.category_var.get()
             self.category_combobox.configure(values=categories)
@@ -500,6 +669,32 @@ if tk is not None:
                 self.category_var.set(categories[0])
             else:
                 self.category_var.set("")
+
+        def _refresh_class_choices(self) -> None:
+            """Odświeża klasy dostępne dla aktualnych lat i kategorii."""
+
+            years = self._get_selected_years()
+            category = self.category_var.get().strip()
+            previous_selection = set(self._get_selected_classes() or [])
+
+            if self.data_frame is None or not category:
+                classes = []
+            else:
+                classes = list_available_classes_for_category_and_years_xlsx(
+                    self.data_frame,
+                    category,
+                    years if years else None,
+                )
+
+            self.available_classes = classes
+            self.classes_listbox.delete(0, tk.END)
+            for klasa in classes:
+                self.classes_listbox.insert(tk.END, format_class_for_display(klasa))
+                if klasa in previous_selection:
+                    self.classes_listbox.selection_set(tk.END)
+
+            if classes and not previous_selection:
+                self.classes_listbox.selection_set(0, tk.END)
 
         def _mark_result_stale(self) -> None:
             """Resetuje wynik po zmianie filtrów i blokuje zapis starego raportu."""
@@ -514,12 +709,13 @@ if tk is not None:
             """
             Uruchamia pełny backend rankingu dla aktualnie ustawionych filtrów.
 
-            Metoda waliduje wybór w GUI, wywołuje `build_ranking`, a potem
+            Metoda waliduje wybór w GUI, wywołuje `build_new_ranking`, a potem
             aktualizuje podsumowanie, status i treść raportu w oknie.
             """
 
             category = self.category_var.get().strip()
             years = self._get_selected_years()
+            classes = self._get_selected_classes()
 
             if not category:
                 messagebox.showerror("Brak kategorii", "Wybierz kategorię rankingu.")
@@ -529,16 +725,17 @@ if tk is not None:
                 return
 
             try:
-                result = build_ranking(
+                result = build_new_ranking(
+                    file_path=self.xlsx_path,
                     category=category,
                     years=years,
-                    rsc_dir=self.rsc_dir,
+                    classes=classes,
                 )
             except Exception as exc:
                 messagebox.showerror("Błąd obliczania", str(exc))
                 return
 
-            report = format_ranking_report(result)
+            report = format_new_ranking_report(result)
             included_categories = ", ".join(result.included_categories) or "brak"
 
             self.current_result = result
@@ -546,14 +743,9 @@ if tk is not None:
             self._set_result_text(report)
             self.summary_var.set(
                 f"Kategoria {result.category} | lata: {', '.join(str(year) for year in result.years)} | "
-                f"pliki: {len(result.processed_files)} | uwzględnione kategorie: {included_categories}"
+                f"turnieje: {result.tournaments_processed} | uwzględnione kategorie: {included_categories}"
             )
-            if result.skipped_files:
-                self.status_var.set(
-                    f"Ranking obliczony. Pominięto {len(result.skipped_files)} plików z błędami."
-                )
-            else:
-                self.status_var.set("Ranking został obliczony.")
+            self.status_var.set("Ranking został obliczony.")
             self.save_button.state(["!disabled"])
 
         def _save_ranking(self) -> None:
@@ -566,10 +758,14 @@ if tk is not None:
                 )
                 return
 
-            default_path = self.project_dir / build_default_output_filename(self.current_result)
+            default_path = (
+                self.project_dir
+                / "txt"
+                / build_default_new_output_filename(self.current_result)
+            )
             output_path = filedialog.asksaveasfilename(
                 title="Zapisz ranking",
-                initialdir=str(self.project_dir),
+                initialdir=str(default_path.parent),
                 initialfile=default_path.name,
                 defaultextension=".txt",
                 filetypes=(("Plik tekstowy", "*.txt"), ("Wszystkie pliki", "*.*")),
@@ -579,7 +775,7 @@ if tk is not None:
                 return
 
             try:
-                saved_path = save_ranking_report(self.current_report, output_path)
+                saved_path = save_new_ranking_report(self.current_report, output_path)
             except Exception as exc:
                 messagebox.showerror("Błąd zapisu", str(exc))
                 return
@@ -602,7 +798,14 @@ def main() -> None:
     parser = build_argument_parser()
     args = parser.parse_args()
 
-    has_cli_arguments = bool(args.category or args.years or args.output)
+    has_cli_arguments = bool(
+        args.input_excel
+        or args.category
+        or args.years
+        or args.classes
+        or args.output
+        or args.all_categories
+    )
 
     if args.cli and not has_cli_arguments:
         raise SystemExit(run_cli_interactive(project_dir))
