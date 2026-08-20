@@ -29,7 +29,8 @@ danych jest oficjalny arkusz `data_new.xlsx`, a glownym punktem wejscia jest
 - `legacy/` - poprzednia wersja oparta o pliki `rsc/`.
 - `ranking_service.py` i `rsc/` - kompatybilnosc ze starym przeplywem; nie sa juz
   domyslna sciezka rozwoju.
-- `SQL/` - eksperymentalne narzedzia SQLite/importu oficjalnych danych.
+- `SQL/` - narzedzia SQLite: import oficjalnych danych, backend rankingu,
+  framework migracji (`migrations.py`) i narzedzia CLI.
 - `tests/` - testy regresyjne aktualnego backendu.
 
 ## Format `data_new.xlsx`
@@ -57,11 +58,17 @@ GUI:
 .venv/bin/python App.py
 ```
 
-CLI dla jednej kategorii:
+CLI dla jednej kategorii (domyślny backend XLSX):
 
 ```bash
 .venv/bin/python App.py --category V --years 2025 --classes B
 .venv/bin/python App.py --category III --years 2022-2025 --classes A S --output ranking_iii.txt
+```
+
+CLI z backendem SQLite:
+
+```bash
+.venv/bin/python App.py --backend sqlite --db ttp_official.sqlite --category V --years 2025 --classes B
 ```
 
 Raporty dla wszystkich kategorii:
@@ -81,6 +88,16 @@ Interaktywny tryb terminalowy:
 ```bash
 .venv/bin/python App.py --cli
 ```
+
+### Wybór backendu
+
+| Argument | Wartości | Opis |
+|----------|----------|------|
+| `--backend` | `xlsx` (domyślnie), `sqlite` | Źródło danych: plik XLSX lub baza SQLite |
+| `--input-excel` | ścieżka | Plik XLSX (dla backend xlsx) |
+| `--db` | ścieżka | Plik bazy SQLite (wymagane dla `--backend sqlite`) |
+
+W GUI dostępny jest rozwijany wybór backendu ("xlsx" / "sqlite") oraz odpowiednie pola wyboru pliku XLSX lub bazy SQLite.
 
 ## Eksport Historii
 
@@ -138,3 +155,26 @@ Szybki smoke test aplikacji CLI:
 Poprzedni backend oparty o katalog `rsc/` zostaje w repozytorium jako punkt
 odniesienia i zgodnosc wsteczna. Nowe zmiany powinny trafiac do sciezki
 `data_new.xlsx`/`new_ranking_service.py`, chyba ze zadanie dotyczy wprost legacy.
+
+## SQLite Backend i Migracje
+
+Moduł `SQL/` zawiera produkcyjny backend oparty na SQLite:
+
+- `migrations.py` — framework migracji z tabelą `schema_version`, migracje v1 (schemat początkowy) i v2 (kolumna `event_date` w `tournaments`).
+- `import_official_ttp_to_sqlite.py` — import oficjalnego XLSX do SQLite (idempotentny, z ostrzeżeniami).
+- `sqlite_ranking_service.py` — backend rankingu ELO (ten sam algorytm co XLSX) z obsługą `event_date` do sortowania chronologicznego.
+- `App_sqlite.py` — CLI do rankingu z SQLite.
+- `progress_export_sqlite.py` — eksport postępu ELO do CSV.
+
+Uruchamianie:
+
+```bash
+# Import oficjalnych danych
+python SQL/import_official_ttp_to_sqlite.py "_Oficjalne dane.xlsx" ttp_official.sqlite
+
+# Ranking z SQLite
+python SQL/App_sqlite.py --db ttp_official.sqlite --category V --years 2025 --classes B
+
+# Eksport postępu do CSV
+python SQL/progress_export_sqlite.py --db ttp_official.sqlite --category V --years 2025
+```

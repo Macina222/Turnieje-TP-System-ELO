@@ -42,6 +42,24 @@ from legacy.ranking_service import (
     normalize_years,
 )
 
+# Optional SQLite backend - may not be available if SQL/ is not on path
+try:
+    import sys
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).resolve().parent / "SQL"))
+    from sqlite_ranking_service import (
+        build_ranking_from_sqlite,
+        format_ranking_report,
+        get_available_years as get_available_years_sqlite,
+        get_available_classes as get_available_classes_sqlite,
+        fetch_events as fetch_events_sqlite,
+        load_config as load_config_sqlite,
+        normalize_classes as normalize_classes_sqlite,
+    )
+    SQLITE_AVAILABLE = True
+except ImportError:
+    SQLITE_AVAILABLE = False
+
 
 # ---------------------------------------------------------------------------
 # Stałe
@@ -149,6 +167,7 @@ class NewRankingBuildResult:
     included_categories: tuple[str, ...]
     included_classes: tuple[str, ...]
     tournaments_processed: int
+    source: str = "xlsx"
 
 
 @dataclass(frozen=True)
@@ -416,12 +435,31 @@ def build_new_ranking(
     category: str | None = None,
     classes: Iterable[str] | None = None,
     config_path: str | Path | None = None,
+    backend: str = "xlsx",
+    db_path: str | Path | None = None,
 ) -> NewRankingBuildResult:
     """
     Buduje ranking ELO dla wybranej kategorii, lat i klas.
 
-    Odpowiednik ``build_ranking`` z legacy, ale czyta z xlsx.
+    Parametry:
+    - file_path: ścieżka do pliku XLSX (dla backend="xlsx")
+    - years: lista lat/sezonów
+    - category: kategoria bazowa (I-VIII)
+    - classes: lista klas do uwzględnienia
+    - config_path: ścieżka do pliku config.txt
+    - backend: "xlsx" (domyślnie) lub "sqlite"
+    - db_path: ścieżka do bazy SQLite (wymagane dla backend="sqlite")
     """
+    if backend == "sqlite":
+        return _build_ranking_sqlite(
+            db_path=db_path,
+            years=years,
+            category=category,
+            classes=classes,
+            config_path=config_path,
+        )
+
+    # XLSX backend (default)
     df = load_xlsx_data(file_path)
     config = load_ranking_config(config_path or DEFAULT_CONFIG_PATH)
 
@@ -473,6 +511,71 @@ def build_new_ranking(
         included_categories=tuple(sorted(inc_cats)),
         included_classes=_sort_classes(inc_classes),
         tournaments_processed=t_count,
+    )
+
+
+def _build_ranking_sqlite(
+    db_path: str | Path | None = None,
+    years: Iterable[int | str] | None = None,
+    category: str | None = None,
+    classes: Iterable[str] | None = None,
+    config_path: str | Path | None = None,
+) -> NewRankingBuildResult:
+    """Buduje ranking używając backendu SQLite."""
+    if not SQLITE_AVAILABLE:
+        raise RuntimeError(
+            "Backend SQLite niedostępny. Upewnij się, że moduł SQL/sqlite_ranking_service.py jest dostępny."
+        )
+    if db_path is None:
+        raise ValueError("Dla backend='sqlite' wymagany jest parametr db_path.")
+
+    config = load_config_sqlite(config_path or DEFAULT_CONFIG_PATH)
+
+    selected_years = normalize_years(years) if years is not None else get_available_years_sqlite(db_path)
+    if not selected_years:
+        raise ValueError("Wybierz przynajmniej jeden rok.")
+
+    base_cat = _normalize_base_category(category)
+    if not base_cat:
+        raise ValueError("Dla backend='sqlite' wymagany jest parametr category.")
+
+    # Get available classes for validation
+    selected_classes = normalize_classes_sqlite(classes) if classes is not None else get_available_classes_sqlite(db_path, base_cat, selected_years)
+
+    run = build_ranking_from_sqlite(
+        db_path=db_path,
+        category=base_cat,
+        years=selected_years,
+        classes=selected_classes,
+        config=config,
+    )
+
+    # Convert SQLite results to NewRankingBuildResult format
+    ranking_entries: list[NewRankingEntry] = []
+    for rating in run.ratings.values():
+        ranking_entries.append(
+            NewRankingEntry(
+                pair_id=str(rating.pair_id),
+                pair_name=rating.display_name,
+                elo=rating.rating,
+                klasa=rating.last_class or "",
+                base_category=rating.last_category or base_cat,
+            )
+        )
+
+    ranking_entries.sort(key=lambda e: e.elo, reverse=True)
+
+    included_categories = sorted({event.cat_code for event in run.processed_events})
+    included_classes = _sort_classes(run.classes) if run.classes else tuple()
+
+    return NewRankingBuildResult(
+        category=base_cat,
+        years=tuple(selected_years),
+        ranking=tuple(ranking_entries),
+        included_categories=tuple(included_categories),
+        included_classes=included_classes,
+        tournaments_processed=len(run.processed_events),
+        source="sqlite",
     )
 
 
@@ -641,7 +744,7 @@ def format_new_ranking_report(result: NewRankingBuildResult) -> str:
         f"Uwzględnione kategorie: "
         + (", ".join(result.included_categories) if result.included_categories else "brak"),
         "",
-        f"Raport wygenerowany z: data_new.xlsx",
+        f"Raport wygenerowany z: {'SQLite' if result.source == 'sqlite' else 'data_new.xlsx'}",
         "",
         header,
         separator,

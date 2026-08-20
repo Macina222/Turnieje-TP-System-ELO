@@ -24,6 +24,8 @@ from typing import Any, Iterable
 
 from openpyxl import load_workbook
 
+from migrations import ensure_schema, CURRENT_SCHEMA_VERSION
+
 REQUIRED_COLUMNS = {
     "dancers id",
     "pair id",
@@ -43,99 +45,6 @@ REQUIRED_COLUMNS = {
 
 ROMAN_CATEGORIES = ["VIII", "VII", "VI", "V", "IV", "III", "II", "I"]
 
-SCHEMA_SQL = """
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS source_files (
-    source_file_id INTEGER PRIMARY KEY,
-    file_name TEXT NOT NULL,
-    absolute_path TEXT,
-    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(file_name, absolute_path)
-);
-
-CREATE TABLE IF NOT EXISTS dancers (
-    dancer_id INTEGER PRIMARY KEY,
-    full_name TEXT,
-    normalized_name TEXT
-);
-
-CREATE TABLE IF NOT EXISTS pairs (
-    pair_id INTEGER PRIMARY KEY,
-    display_name TEXT,
-    normalized_name TEXT
-);
-
-CREATE TABLE IF NOT EXISTS pair_members (
-    pair_id INTEGER NOT NULL,
-    dancer_id INTEGER NOT NULL,
-    member_order INTEGER NOT NULL,
-    PRIMARY KEY (pair_id, dancer_id),
-    UNIQUE(pair_id, member_order),
-    FOREIGN KEY (pair_id) REFERENCES pairs(pair_id),
-    FOREIGN KEY (dancer_id) REFERENCES dancers(dancer_id)
-);
-
-CREATE TABLE IF NOT EXISTS groups (
-    group_id INTEGER PRIMARY KEY,
-    group_name TEXT NOT NULL UNIQUE,
-    normalized_name TEXT
-);
-
-CREATE TABLE IF NOT EXISTS tournaments (
-    tournament_id INTEGER PRIMARY KEY,
-    season INTEGER NOT NULL,
-    tournament_code TEXT NOT NULL,
-    tournament_name TEXT NOT NULL,
-    UNIQUE(season, tournament_code)
-);
-
-CREATE TABLE IF NOT EXISTS events (
-    event_id INTEGER PRIMARY KEY,
-    tournament_id INTEGER NOT NULL,
-    cat_code TEXT NOT NULL,
-    base_category TEXT,
-    class_code TEXT,
-    UNIQUE(tournament_id, cat_code),
-    FOREIGN KEY (tournament_id) REFERENCES tournaments(tournament_id)
-);
-
-CREATE TABLE IF NOT EXISTS results (
-    result_id INTEGER PRIMARY KEY,
-    event_id INTEGER NOT NULL,
-    pair_id INTEGER NOT NULL,
-    group_id INTEGER,
-    rank REAL NOT NULL,
-    points_before REAL,
-    points_awarded REAL,
-    medals_awarded REAL,
-    points_after REAL,
-    medals_after REAL,
-    source_file_id INTEGER NOT NULL,
-    source_row_number INTEGER NOT NULL,
-    raw_dancers_id TEXT,
-    raw_pair_name TEXT,
-    FOREIGN KEY (event_id) REFERENCES events(event_id),
-    FOREIGN KEY (pair_id) REFERENCES pairs(pair_id),
-    FOREIGN KEY (group_id) REFERENCES groups(group_id),
-    FOREIGN KEY (source_file_id) REFERENCES source_files(source_file_id)
-);
-
-CREATE TABLE IF NOT EXISTS import_warnings (
-    warning_id INTEGER PRIMARY KEY,
-    source_file_id INTEGER NOT NULL,
-    source_row_number INTEGER,
-    warning_type TEXT NOT NULL,
-    message TEXT NOT NULL,
-    FOREIGN KEY (source_file_id) REFERENCES source_files(source_file_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_results_event ON results(event_id);
-CREATE INDEX IF NOT EXISTS idx_results_pair ON results(pair_id);
-CREATE INDEX IF NOT EXISTS idx_events_cat ON events(cat_code, base_category, class_code);
-CREATE INDEX IF NOT EXISTS idx_tournaments_season ON tournaments(season);
-"""
-
 
 @dataclass(frozen=True)
 class OfficialRow:
@@ -154,6 +63,7 @@ class OfficialRow:
     medals_awarded: float | None
     points_after: float | None
     medals_after: float | None
+    event_date: str | None = None
 
 
 def normalize_text(value: Any) -> str | None:
@@ -211,6 +121,21 @@ def find_header(rows: Iterable[tuple[int, tuple[Any, ...]]]) -> tuple[int, dict[
     raise RuntimeError("Nie znaleziono wiersza nagłówka z wymaganymi kolumnami.")
 
 
+def _extract_event_date(columns: dict[str, int]) -> str | None:
+    """
+    Extract event date from column mapping.
+
+    The official XLSX doesn't have a date column yet, but future versions
+    might add one. This function is a placeholder that returns None for now
+    but is ready to parse a date column when it's added to the schema.
+    """
+    # Future: check for "data" or "date" column
+    # if "data" in columns: return parse_and_normalize_date(...)
+
+    # Currently no date in official format
+    return None
+
+
 def iter_official_rows(xlsx_path: Path, sheet_name: str | None = None) -> Iterable[OfficialRow]:
     workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
     worksheet = workbook[sheet_name] if sheet_name else workbook.active
@@ -249,6 +174,7 @@ def iter_official_rows(xlsx_path: Path, sheet_name: str | None = None) -> Iterab
             medals_awarded=as_float_or_none(get("medals")),
             points_after=as_float_or_none(get("points after")),
             medals_after=as_float_or_none(get("medals after")),
+            event_date=_extract_event_date(columns),
         )
 
 
@@ -279,10 +205,10 @@ def get_or_create_group(conn: sqlite3.Connection, group_name: str | None) -> int
 def get_or_create_tournament(conn: sqlite3.Connection, row: OfficialRow) -> int:
     conn.execute(
         """
-        INSERT OR IGNORE INTO tournaments(season, tournament_code, tournament_name)
-        VALUES (?, ?, ?)
+        INSERT OR IGNORE INTO tournaments(season, tournament_code, tournament_name, event_date)
+        VALUES (?, ?, ?, ?)
         """,
-        (row.season, row.tournament_code, row.tournament_name),
+        (row.season, row.tournament_code, row.tournament_name, row.event_date),
     )
     return conn.execute(
         "SELECT tournament_id FROM tournaments WHERE season = ? AND tournament_code = ?",
@@ -359,9 +285,11 @@ def import_xlsx_to_sqlite(xlsx_path: Path, sqlite_path: Path, sheet_name: str | 
     if replace and sqlite_path.exists():
         sqlite_path.unlink()
 
+    # Ensure schema is up to date (runs migrations if needed)
+    ensure_schema(sqlite_path, CURRENT_SCHEMA_VERSION)
+
     with sqlite3.connect(sqlite_path) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.executescript(SCHEMA_SQL)
         source_file_id = upsert_source_file(conn, xlsx_path)
 
         imported = 0

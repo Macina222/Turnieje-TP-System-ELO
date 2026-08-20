@@ -24,6 +24,13 @@ from typing import Iterable
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "config.txt"
 DEFAULT_ELO = 1000.0
 
+# Import unified config (backwards compatible)
+from ranking_config import (
+    EloConfig as RankingConfig,
+    load_config as load_ranking_config,
+    get_default_elo_for_class,
+)
+
 # Kolejność klas od najwyższej do najniższej (do sortowania wyświetlania)
 CLASS_ORDER = ["S", "OPEN", "A", "B", "C"]
 
@@ -304,98 +311,14 @@ def describe_tournament_file(
 
 
 # ---------------------------------------------------------------------------
-# Konfiguracja
+# Konfiguracja (delegowana do ranking_config.py)
 # ---------------------------------------------------------------------------
 
-def _parse_config_number(raw_value: str, key: str, line_number: int) -> float:
-    """Parsuje pojedynczą wartość liczbową z `config.txt` wraz z walidacją."""
-    value = raw_value.split("#", 1)[0].strip().replace(",", ".")
-    if not value:
-        raise ValueError(
-            f"Brak wartosci dla {key} w pliku config.txt (linia {line_number})."
-        )
-    try:
-        return float(value)
-    except ValueError as exc:
-        raise ValueError(
-            f"Nieprawidlowa wartosc dla {key} w pliku config.txt "
-            f"(linia {line_number}): {raw_value.strip()}"
-        ) from exc
-
-
-def load_ranking_config(config_path: str | Path | None = None) -> RankingConfig:
-    """
-    Wczytuje parametry ELO z pliku konfiguracyjnego projektu.
-
-    Obsługuje klucze:
-      K=<liczba>          — współczynnik K
-      D=<liczba>          — współczynnik D
-      defaulteloC=<liczba> — domyślne ELO dla klasy C
-      defaulteloB=<liczba> — domyślne ELO dla klasy B
-      defaulteloA=<liczba> — domyślne ELO dla klasy A
-      defaulteloS=<liczba> — domyślne ELO dla klasy S
-      defaulteloOPEN=<liczba> — domyślne ELO dla OPEN i pozostałych klas
-    """
-    path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
-    if not path.is_file():
-        raise FileNotFoundError(f"Nie znaleziono pliku konfiguracyjnego: {path}")
-
-    values: dict[str, float] = {}
-    class_elos: dict[str, float] = {}
-
-    for line_number, raw_line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(), start=1
-    ):
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            raise ValueError(
-                f"Nieprawidlowy wpis w pliku config.txt (linia {line_number}): {raw_line}"
-            )
-        key, value = line.split("=", 1)
-        normalized_key = key.strip().lower()
-
-        if normalized_key in {"k", "d"}:
-            values[normalized_key] = _parse_config_number(
-                value, normalized_key.upper(), line_number
-            )
-        elif normalized_key.startswith("defaultelo"):
-            klasa = normalized_key[len("defaultelo"):].upper()
-            class_elos[klasa] = _parse_config_number(value, normalized_key, line_number)
-
-    missing = [key.upper() for key in ("k", "d") if key not in values]
-    if missing:
-        raise ValueError(
-            "Brakuje wymaganych wartosci w config.txt: " + ", ".join(missing)
-        )
-    if values["k"] < 0:
-        raise ValueError("Wartosc K w config.txt nie moze byc ujemna.")
-    if values["d"] <= 0:
-        raise ValueError("Wartosc D w config.txt musi byc dodatnia.")
-
-    return RankingConfig(
-        k_factor=values["k"],
-        d_factor=values["d"],
-        class_default_elos=class_elos,
-    )
-
-
-def get_default_elo_for_class(klasa: str, class_default_elos: dict[str, float]) -> float:
-    """
-    Zwraca domyślne ELO dla danej klasy.
-
-    Klasy S, A, B i C mogą mieć własne wartości w config.txt. OPEN oraz
-    pozostałe sufiksy klas, np. "AB", "DEBIUT" albo brak sufiksu, korzystają
-    z `defaulteloOPEN`. Gdy stary config nie ma tej wartości, używana jest
-    stała DEFAULT_ELO.
-    """
-    if klasa in class_default_elos:
-        return class_default_elos[klasa]
-    if "OPEN" in class_default_elos:
-        return class_default_elos["OPEN"]
-    return DEFAULT_ELO
-
+from ranking_config import (
+    EloConfig as RankingConfig,
+    load_config as load_ranking_config,
+    get_default_elo_for_class,
+)
 
 # ---------------------------------------------------------------------------
 # Algorytm ELO

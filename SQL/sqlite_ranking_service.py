@@ -11,44 +11,21 @@ It deliberately treats official pair_id/dancer_id values as the source of truth.
 
 from __future__ import annotations
 
-import configparser
 import math
+import os
 import sqlite3
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
+# Unified config module (P1) - used by both XLSX and SQLite backends
+# Add project root to sys.path so ranking_config can be imported from SQL/ context
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
-DEFAULT_CONFIG = {
-    "K": 50.0,
-    "D": 250.0,
-    "defaulteloC": 1100.0,
-    "defaulteloB": 1100.0,
-    "defaulteloA": 1200.0,
-    "defaulteloS": 1300.0,
-    "defaulteloOPEN": 1000.0,
-}
-
-
-@dataclass
-class EloConfig:
-    K: float = DEFAULT_CONFIG["K"]
-    D: float = DEFAULT_CONFIG["D"]
-    defaulteloC: float = DEFAULT_CONFIG["defaulteloC"]
-    defaulteloB: float = DEFAULT_CONFIG["defaulteloB"]
-    defaulteloA: float = DEFAULT_CONFIG["defaulteloA"]
-    defaulteloS: float = DEFAULT_CONFIG["defaulteloS"]
-    defaulteloOPEN: float = DEFAULT_CONFIG["defaulteloOPEN"]
-
-    def default_for_class(self, class_code: Optional[str]) -> float:
-        cls = (class_code or "OPEN").upper()
-        return {
-            "C": self.defaulteloC,
-            "B": self.defaulteloB,
-            "A": self.defaulteloA,
-            "S": self.defaulteloS,
-            "OPEN": self.defaulteloOPEN,
-        }.get(cls, self.defaulteloOPEN)
+from ranking_config import EloConfig, load_config
 
 
 @dataclass
@@ -76,6 +53,7 @@ class EventMeta:
     base_category: str
     class_code: Optional[str]
     source_order: int
+    event_date: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -97,27 +75,6 @@ class RankingRun:
     ratings: dict[int, PairRating] = field(default_factory=dict)
     progress_rows: list[dict] = field(default_factory=list)
     skipped_events: list[str] = field(default_factory=list)
-
-
-def load_config(path: str | Path = "config.txt") -> EloConfig:
-    """Load legacy config.txt with KEY=VALUE lines.
-
-    The old project stores values as plain lines such as K=50, not as INI sections.
-    This parser supports that format and falls back to defaults when a key is absent.
-    """
-    cfg = dict(DEFAULT_CONFIG)
-    path = Path(path)
-    if path.exists():
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip()
-            if key in cfg:
-                cfg[key] = float(value)
-    return EloConfig(**cfg)
 
 
 def _connect(db_path: str | Path) -> sqlite3.Connection:
@@ -163,6 +120,26 @@ def get_available_years(db_path: str | Path) -> list[int]:
         return [r[0] for r in con.execute("SELECT DISTINCT season FROM tournaments ORDER BY season")]
 
 
+def get_available_categories_sqlite(db_path: str | Path, years: Optional[Sequence[int]] = None) -> list[str]:
+    """Return base categories available in the DB for given years."""
+    params: list[object] = []
+    where = []
+    if years:
+        placeholders = ",".join("?" for _ in years)
+        where.append(f"t.season IN ({placeholders})")
+        params.extend(years)
+    where_clause = f"WHERE {' AND '.join(where)}" if where else ""
+    sql = f"""
+        SELECT DISTINCT e.base_category
+        FROM events e
+        JOIN tournaments t ON t.tournament_id = e.tournament_id
+        {where_clause}
+        ORDER BY e.base_category
+    """
+    with _connect(db_path) as con:
+        return [r[0] for r in con.execute(sql, params)]
+
+
 def get_available_classes(db_path: str | Path, category: str, years: Optional[Sequence[int]] = None) -> list[str]:
     category = category.upper()
     params: list[object] = [category]
@@ -193,9 +170,9 @@ def fetch_events(
 ) -> list[EventMeta]:
     """Return events in deterministic processing order.
 
-    Important: official data currently contains season and tournament code/name, but not
-    exact calendar dates. Therefore order is season ascending + first source row order.
-    If dates are later added to the database, replace this ORDER BY with event_date.
+    Order preference:
+    1. event_date (if populated) - most accurate for chronological order
+    2. season ascending + first source row order - fallback for official data
     """
     category = category.upper()
     classes_norm = normalize_classes(classes)
@@ -228,13 +205,19 @@ def fetch_events(
             e.cat_code,
             e.base_category,
             e.class_code,
-            MIN(r.source_row_number) AS source_order
+            MIN(r.source_row_number) AS source_order,
+            t.event_date
         FROM events e
         JOIN tournaments t ON t.tournament_id = e.tournament_id
         JOIN results r ON r.event_id = e.event_id
         WHERE {' AND '.join(where)}
         GROUP BY e.event_id
-        ORDER BY t.season ASC, source_order ASC, e.event_id ASC
+        ORDER BY
+            CASE WHEN t.event_date IS NOT NULL THEN 0 ELSE 1 END,
+            t.event_date ASC,
+            t.season ASC,
+            source_order ASC,
+            e.event_id ASC
     """
     with _connect(db_path) as con:
         return [EventMeta(**dict(r)) for r in con.execute(sql, params)]
@@ -346,6 +329,7 @@ def process_event(
                 "punkty_przed": round(elo_before, 6),
                 "punkty_po": round(elo_after, 6),
                 "roznica_punktow": round(elo_delta, 6),
+                "event_date": event.event_date or "",
             }
         )
 
@@ -421,6 +405,7 @@ def write_progress_csv(run: RankingRun, output_path: str | Path, delimiter: str 
         "season",
         "tournament_code",
         "tournament_name",
+        "event_date",
         "event_id",
         "cat_code",
         "base_category",

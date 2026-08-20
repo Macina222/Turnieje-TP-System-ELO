@@ -4,7 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
+
+# Add project root so ranking_config can be imported from SQL/ context
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 from sqlite_ranking_service import (
     build_ranking_from_sqlite,
@@ -14,6 +20,7 @@ from sqlite_ranking_service import (
     load_config,
     parse_years_arg,
 )
+from ranking_config import DEFAULT_CONFIG_PATH
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--category", required=True, help="Base category, e.g. V, VI, III")
     parser.add_argument("--years", nargs="*", help="Years or ranges, e.g. 2024 2025 or 2021-2025")
     parser.add_argument("--classes", nargs="*", help="Optional class filter, e.g. B A S OPEN")
-    parser.add_argument("--config", default="config.txt", help="Path to legacy config.txt")
+    parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH), help="Path to legacy config.txt")
     parser.add_argument("--output", help="Optional output report path")
     parser.add_argument("--list-years", action="store_true", help="List available years and exit")
     parser.add_argument("--list-classes", action="store_true", help="List available classes for selected category/years and exit")
