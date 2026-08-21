@@ -1,18 +1,27 @@
 """
-Punkt wejścia aplikacji rankingu ELO.
+Punkt wejścia aplikacji rankingu ELO — centralne centrum sterowania.
 
-Ten moduł spina warstwę użytkownika z backendem obliczeniowym:
-1. odczytuje dostępne lata, kategorie i klasy z `data_new.xlsx`,
-2. pozwala wybrać filtry w GUI albo CLI,
-3. przekazuje wybór do `new_ranking_service.build_new_ranking`,
-4. odbiera gotowy raport i pokazuje go w oknie lub konsoli,
-5. opcjonalnie zapisuje raport do pliku tekstowego.
+Ten moduł spina warstwę użytkownika z backendem obliczeniowym i udostępnia
+wszystkie funkcje aplikacji z jednego miejsca:
+1. Ranking ELO (backend XLSX lub SQLite)
+2. Import oficjalnych danych do bazy SQLite + migracje schematu
+3. Eksport historii zmian punktów (CSV) dla obu backendów
+4. Rysowanie wykresów historii ELO par (dla obu backendów)
+5. Zarządzanie migracjami bazy SQLite
+
+Uruchamiaj z GUI (domyślnie) lub CLI (--cli / argumenty obliczeń).
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
+
+# Add SQL/ to path so its modules can be imported
+_SQL_DIR = Path(__file__).resolve().parent / "SQL"
+if str(_SQL_DIR) not in sys.path:
+    sys.path.insert(0, str(_SQL_DIR))
 
 from new_ranking_service import (
     build_default_new_output_filename,
@@ -118,6 +127,7 @@ def prompt_for_category(categories: list[str]) -> str:
     """Pozwala wybrać kategorię przez numer pozycji albo symbol kategorii."""
 
     print("Dostępne kategorie:")
+    categories = [c for c in categories if c]
     for index, category in enumerate(categories, start=1):
         print(f"{index}. {category}")
 
@@ -167,14 +177,9 @@ def prompt_yes_no(prompt: str, default: bool = True) -> bool:
 
 def run_cli_interactive(project_dir: Path) -> int:
     """
-    Uruchamia interaktywny tryb terminalowy.
+    Uruchamia interaktywny tryb terminalowy (tylko ranking).
 
-    Przepływ jest prosty:
-    1. wykryj dostępne lata,
-    2. poproś o wybór lat i kategorii,
-    3. wylicz ranking,
-    4. pokaż raport,
-    5. opcjonalnie zapisz wynik do pliku.
+    Przepływ jest prosty: wykryj lata, poproś o wybór, wylicz, pokaż, zapisz.
     """
 
     xlsx_path = project_dir / "data_new.xlsx"
@@ -197,9 +202,7 @@ def run_cli_interactive(project_dir: Path) -> int:
 
     selected_category = prompt_for_category(categories)
     available_classes = list_available_classes_for_category_and_years_xlsx(
-        df,
-        selected_category,
-        selected_years,
+        df, selected_category, selected_years
     )
     selected_classes = prompt_for_classes(available_classes)
     result = build_new_ranking(
@@ -217,9 +220,7 @@ def run_cli_interactive(project_dir: Path) -> int:
     if prompt_yes_no("Zapisać ranking do pliku?", default=True):
         default_name = build_default_new_output_filename(result)
         suggested_path = project_dir / "txt" / default_name
-        target = input(
-            f"Ścieżka zapisu [{suggested_path}]: "
-        ).strip()
+        target = input(f"Ścieżka zapisu [{suggested_path}]: ").strip()
         output_path = Path(target) if target else suggested_path
         if not output_path.is_absolute() and len(output_path.parts) == 1:
             output_path = project_dir / "txt" / output_path
@@ -229,55 +230,13 @@ def run_cli_interactive(project_dir: Path) -> int:
     return 0
 
 
-def run_cli_from_args(args: argparse.Namespace, project_dir: Path) -> int:
-    """Obsługuje nieinteraktywny tryb CLI przez wybrany backend."""
-
-    # SQLite backend
-    if getattr(args, "backend", "xlsx") == "sqlite":
-        from new_ranking_service import (
-            build_new_ranking,
-            format_new_ranking_report,
-            save_new_ranking_report,
-        )
-
-        if not args.db:
-            print("Błąd: dla backend='sqlite' wymagany jest argument --db.")
-            return 1
-
-        if not args.category:
-            print("Błąd: dla backend='sqlite' wymagany jest argument --category.")
-            return 1
-
-        from new_ranking_service import normalize_years
-        from sqlite_ranking_service import (
-            get_available_years as get_available_years_sqlite,
-            parse_years_arg,
-        )
-
-        years = parse_years_arg(args.years) if args.years else get_available_years_sqlite(args.db)
-        result = build_new_ranking(
-            category=args.category,
-            years=years,
-            classes=args.classes,
-            db_path=args.db,
-            backend="sqlite",
-        )
-        report = format_new_ranking_report(result)
-        print(report)
-        if args.output:
-            saved_path = save_new_ranking_report(report, args.output)
-            print(f"Zapisano do: {saved_path}")
-        return 0
-
-    return run_new_cli_from_args(args, project_dir)
-
-
 def build_argument_parser() -> argparse.ArgumentParser:
     """Buduje parser argumentów współdzielony przez GUI i tryb terminalowy."""
 
     parser = argparse.ArgumentParser(
         description="Kalkulator rankingu ELO dla data_new.xlsx (XLSX backend) lub SQLite."
     )
+    # Backend & data source
     parser.add_argument(
         "--backend",
         choices=["xlsx", "sqlite"],
@@ -292,6 +251,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--db",
         help="Ścieżka do bazy SQLite (wymagane dla --backend sqlite).",
     )
+    # Ranking filters
     parser.add_argument(
         "--category",
         help="Kategoria bazowa rankingu, np. V albo III.",
@@ -308,7 +268,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output",
-        help="Opcjonalna ścieżka pliku wyjściowego dla jednej kategorii.",
+        help="Opcjonalna ścieżka pliku wyjściowego dla jednej kategorii (ranking).",
     )
     parser.add_argument(
         "--output-dir",
@@ -321,6 +281,126 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Wygeneruj raporty dla wszystkich kategorii dostępnych w latach.",
     )
     parser.add_argument(
+        "--list-categories",
+        action="store_true",
+        help="Wypisz dostępne kategorie dla wybranych lat i wyjdź (tylko SQLite).",
+    )
+    parser.add_argument(
+        "--list-classes",
+        action="store_true",
+        help="Wypisz dostępne klasy dla wybranej kategorii/lat i wyjdź (tylko SQLite).",
+    )
+    parser.add_argument(
+        "--list-years",
+        action="store_true",
+        help="Wypisz dostępne lata w bazie i wyjdź (tylko SQLite).",
+    )
+    # Import SQL
+    parser.add_argument(
+        "--import-sql",
+        nargs=2,
+        metavar=("XLSX", "SQLITE"),
+        help="Importuj oficjalne dane XLSX do bazy SQLite: --import-sql <plik.xlsx> <baza.db>.",
+    )
+    parser.add_argument(
+        "--import-sheet",
+        help="Nazwa arkusza przy imporcie (opcjonalne).",
+    )
+    parser.add_argument(
+        "--replace-db",
+        action="store_true",
+        help="Usuń istniejącą bazę przed importem.",
+    )
+    # Migrations
+    parser.add_argument(
+        "--migrate",
+        metavar="DB",
+        help="Uruchom migracje bazy SQLite: --migrate <baza.db>.",
+    )
+    parser.add_argument(
+        "--migrate-target",
+        type=int,
+        help="Docelowa wersja migracji (domyślnie: najnowsza).",
+    )
+    parser.add_argument(
+        "--migrate-status",
+        action="store_true",
+        help="Pokaż status migracji bazy zamiast ich uruchamiać.",
+    )
+    # Export progress CSV
+    parser.add_argument(
+        "--export-progress",
+        action="store_true",
+        help="Eksportuj historię zmian punktów do CSV (wymaga --category, --years).",
+    )
+    parser.add_argument(
+        "--export-output",
+        help="Ścieżka pliku CSV dla --export-progress.",
+    )
+    parser.add_argument(
+        "--delimiter",
+        default=";",
+        help="Separator CSV (domyślnie średnik).",
+    )
+    parser.add_argument(
+        "--config",
+        default="config.txt",
+        help="Ścieżka do pliku konfiguracyjnego (domyślnie: config.txt).",
+    )
+    # Plot
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Rysuj wykres ELO par (wymaga --category, --years).",
+    )
+    parser.add_argument(
+        "--pair",
+        action="append",
+        help="Nazwa pary do wykresu (można wielokrotnie).",
+    )
+    parser.add_argument(
+        "--pair-id",
+        action="append",
+        help="ID pary do wykresu (można wielokrotnie).",
+    )
+    parser.add_argument(
+        "--tancerz1",
+        help="Pierwszy tancerz pary (używaj z --tancerz2).",
+    )
+    parser.add_argument(
+        "--tancerz2",
+        help="Drugi tancerz pary (używaj z --tancerz1).",
+    )
+    parser.add_argument(
+        "--list-pairs",
+        action="store_true",
+        help="Wypisz dostępne pary zamiast rysować wykres.",
+    )
+    parser.add_argument(
+        "--search",
+        help="Filtr tekstowy dla --list-pairs.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Limit pozycji w --list-pairs (domyślnie 50).",
+    )
+    parser.add_argument(
+        "--plot-output",
+        help="Ścieżka zapisu wykresu PNG (dla --plot).",
+    )
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="Pokaż okno wykresu także przy --plot-output.",
+    )
+    parser.add_argument(
+        "--title",
+        help="Własny tytuł wykresu (dla --plot).",
+    )
+    # Mode
+    parser.add_argument(
         "--cli",
         action="store_true",
         help="Wymuś tryb terminalowy nawet jeśli tkinter jest dostępny.",
@@ -329,652 +409,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
 
 if tk is not None:
-    class RankingApp(tk.Tk):
-        """
-        Okno GUI do liczenia rankingu bez pracy w terminalu.
-
-        Klasa utrzymuje aktualny stan filtrów, deleguje obliczenia do backendu
-        i pokazuje raport tekstowy wraz ze statusem ostatniej operacji.
-        """
-
-        def __init__(self) -> None:
-            """Inicjalizuje okno, dane wejściowe i bazowy stan interfejsu."""
-
-            super().__init__()
-
-            self.title("Kalkulator rankingu ELO")
-            self.geometry("1280x820")
-            self.minsize(980, 640)
-
-            self.project_dir = Path(__file__).resolve().parent
-            self.xlsx_path = self.project_dir / "data_new.xlsx"
-            self.data_frame = load_xlsx_data(self.xlsx_path) if self.xlsx_path.is_file() else None
-            self.available_years = (
-                list_available_years_xlsx(self.data_frame)
-                if self.data_frame is not None
-                else []
-            )
-            self.current_result = None
-            self.current_report = ""
-            self.available_classes: list[str] = []
-
-            self.category_var = tk.StringVar()
-            self.source_var = tk.StringVar(value=str(self.xlsx_path))
-            self.backend_var = tk.StringVar(value="xlsx")
-            self.db_var = tk.StringVar()
-            self.status_var = tk.StringVar(
-                value="Wybierz kategorię i lata, a następnie kliknij \"Oblicz ranking\"."
-            )
-            self.summary_var = tk.StringVar(
-                value="Ranking nie został jeszcze obliczony."
-            )
-
-            self._build_ui()
-            self._select_all_years()
-            self._refresh_category_choices()
-            self.summary_var.set("Ranking nie został jeszcze obliczony dla bieżących filtrów.")
-            self.status_var.set(
-                "Wybierz kategorię i lata, a następnie kliknij \"Oblicz ranking\"."
-            )
-
-            if not self.available_years:
-                self.calculate_button.state(["disabled"])
-                self.status_var.set("Nie znaleziono sezonów w data_new.xlsx.")
-
-        def _build_ui(self) -> None:
-            """Buduje layout okna: filtry po lewej, raport i status po prawej."""
-
-            try:
-                ttk.Style(self).theme_use("clam")
-            except tk.TclError:
-                pass
-
-            self.columnconfigure(0, weight=1)
-            self.rowconfigure(0, weight=1)
-
-            container = ttk.Frame(self, padding=16)
-            container.grid(row=0, column=0, sticky="nsew")
-            container.columnconfigure(1, weight=1)
-            container.rowconfigure(0, weight=1)
-
-            sidebar = ttk.Frame(container)
-            sidebar.grid(row=0, column=0, sticky="nsw", padx=(0, 16))
-            sidebar.columnconfigure(0, weight=1)
-
-            filters_frame = ttk.LabelFrame(sidebar, text="Filtry", padding=12)
-            filters_frame.grid(row=0, column=0, sticky="new")
-            filters_frame.columnconfigure(0, weight=1)
-
-            # Backend selection
-            ttk.Label(filters_frame, text="Backend danych").grid(
-                row=0, column=0, sticky="w"
-            )
-            backend_combo = ttk.Combobox(
-                filters_frame,
-                textvariable=self.backend_var,
-                values=["xlsx", "sqlite"],
-                state="readonly",
-                width=20,
-            )
-            backend_combo.grid(row=1, column=0, sticky="ew", pady=(4, 4))
-            backend_combo.bind("<<ComboboxSelected>>", self._on_backend_changed)
-
-            # XLSX file selection (shown for xlsx backend)
-            self.xlsx_source_label = ttk.Label(filters_frame, text="Plik danych (XLSX)")
-            self.xlsx_source_label.grid(row=2, column=0, sticky="w")
-            source_frame = ttk.Frame(filters_frame)
-            source_frame.grid(row=3, column=0, sticky="ew", pady=(4, 12))
-            source_frame.columnconfigure(0, weight=1)
-            ttk.Entry(
-                source_frame,
-                textvariable=self.source_var,
-                state="readonly",
-                width=32,
-            ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-            ttk.Button(
-                source_frame,
-                text="Wybierz...",
-                command=self._choose_xlsx_file,
-            ).grid(row=0, column=1, sticky="e")
-
-            # SQLite database selection (shown for sqlite backend)
-            self.db_source_label = ttk.Label(filters_frame, text="Baza danych (SQLite)")
-            self.db_source_label.grid(row=4, column=0, sticky="w")
-            db_frame = ttk.Frame(filters_frame)
-            db_frame.grid(row=5, column=0, sticky="ew", pady=(4, 12))
-            db_frame.columnconfigure(0, weight=1)
-            self.db_entry = ttk.Entry(
-                db_frame,
-                textvariable=self.db_var,
-                width=32,
-            )
-            self.db_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-            ttk.Button(
-                db_frame,
-                text="Wybierz...",
-                command=self._choose_sqlite_db,
-            ).grid(row=0, column=1, sticky="e")
-
-            self._update_backend_ui()
-
-            ttk.Label(filters_frame, text="Kategoria rankingu").grid(
-                row=2, column=0, sticky="w"
-            )
-            self.category_combobox = ttk.Combobox(
-                filters_frame,
-                textvariable=self.category_var,
-                state="readonly",
-                width=20,
-            )
-            self.category_combobox.grid(row=3, column=0, sticky="ew", pady=(4, 12))
-            self.category_combobox.bind("<<ComboboxSelected>>", self._on_category_changed)
-
-            ttk.Label(filters_frame, text="Lata uwzględniane w kalkulacji").grid(
-                row=4, column=0, sticky="w"
-            )
-
-            years_frame = ttk.Frame(filters_frame)
-            years_frame.grid(row=5, column=0, sticky="nsew", pady=(4, 12))
-            years_frame.columnconfigure(0, weight=1)
-            years_frame.rowconfigure(0, weight=1)
-
-            self.years_listbox = tk.Listbox(
-                years_frame,
-                selectmode=tk.EXTENDED,
-                exportselection=False,
-                height=10,
-                width=18,
-            )
-            self.years_listbox.grid(row=0, column=0, sticky="nsew")
-            self.years_listbox.bind("<<ListboxSelect>>", self._on_year_selection_change)
-
-            years_scroll = ttk.Scrollbar(
-                years_frame, orient="vertical", command=self.years_listbox.yview
-            )
-            years_scroll.grid(row=0, column=1, sticky="ns")
-            self.years_listbox.configure(yscrollcommand=years_scroll.set)
-
-            for year in self.available_years:
-                self.years_listbox.insert(tk.END, year)
-
-            years_buttons = ttk.Frame(filters_frame)
-            years_buttons.grid(row=6, column=0, sticky="ew")
-            years_buttons.columnconfigure(0, weight=1)
-            years_buttons.columnconfigure(1, weight=1)
-
-            ttk.Button(
-                years_buttons, text="Zaznacz wszystkie", command=self._select_all_years
-            ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-            ttk.Button(
-                years_buttons, text="Wyczyść wybór", command=self._clear_years_selection
-            ).grid(row=0, column=1, sticky="ew")
-
-            ttk.Label(filters_frame, text="Klasy").grid(
-                row=7, column=0, sticky="w", pady=(12, 0)
-            )
-            classes_frame = ttk.Frame(filters_frame)
-            classes_frame.grid(row=8, column=0, sticky="nsew", pady=(4, 12))
-            classes_frame.columnconfigure(0, weight=1)
-            classes_frame.rowconfigure(0, weight=1)
-
-            self.classes_listbox = tk.Listbox(
-                classes_frame,
-                selectmode=tk.EXTENDED,
-                exportselection=False,
-                height=7,
-                width=18,
-            )
-            self.classes_listbox.grid(row=0, column=0, sticky="nsew")
-            self.classes_listbox.bind("<<ListboxSelect>>", self._on_filter_changed)
-
-            classes_scroll = ttk.Scrollbar(
-                classes_frame, orient="vertical", command=self.classes_listbox.yview
-            )
-            classes_scroll.grid(row=0, column=1, sticky="ns")
-            self.classes_listbox.configure(yscrollcommand=classes_scroll.set)
-
-            classes_buttons = ttk.Frame(filters_frame)
-            classes_buttons.grid(row=9, column=0, sticky="ew")
-            classes_buttons.columnconfigure(0, weight=1)
-            classes_buttons.columnconfigure(1, weight=1)
-
-            ttk.Button(
-                classes_buttons,
-                text="Zaznacz wszystkie",
-                command=self._select_all_classes,
-            ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-            ttk.Button(
-                classes_buttons,
-                text="Wyczyść wybór",
-                command=self._clear_classes_selection,
-            ).grid(row=0, column=1, sticky="ew")
-
-            actions_frame = ttk.Frame(sidebar)
-            actions_frame.grid(row=1, column=0, sticky="ew", pady=(12, 0))
-            actions_frame.columnconfigure(0, weight=1)
-
-            self.calculate_button = ttk.Button(
-                actions_frame,
-                text="Oblicz ranking",
-                command=self._calculate_ranking,
-            )
-            self.calculate_button.grid(row=0, column=0, sticky="ew")
-
-            self.save_button = ttk.Button(
-                actions_frame,
-                text="Zapisz ranking",
-                command=self._save_ranking,
-            )
-            self.save_button.grid(row=1, column=0, sticky="ew", pady=(8, 0))
-            self.save_button.state(["disabled"])
-
-            status_frame = ttk.LabelFrame(sidebar, text="Status", padding=12)
-            status_frame.grid(row=2, column=0, sticky="ew", pady=(12, 0))
-            status_frame.columnconfigure(0, weight=1)
-
-            ttk.Label(
-                status_frame,
-                textvariable=self.status_var,
-                wraplength=280,
-                justify="left",
-            ).grid(row=0, column=0, sticky="w")
-
-            results_frame = ttk.Frame(container)
-            results_frame.grid(row=0, column=1, sticky="nsew")
-            results_frame.columnconfigure(0, weight=1)
-            results_frame.rowconfigure(1, weight=1)
-
-            ttk.Label(
-                results_frame,
-                textvariable=self.summary_var,
-                wraplength=760,
-                justify="left",
-            ).grid(row=0, column=0, sticky="ew", pady=(0, 10))
-
-            text_frame = ttk.Frame(results_frame)
-            text_frame.grid(row=1, column=0, sticky="nsew")
-            text_frame.columnconfigure(0, weight=1)
-            text_frame.rowconfigure(0, weight=1)
-
-            self.result_text = tk.Text(
-                text_frame,
-                wrap="none",
-                font=("Courier New", 10),
-                state="disabled",
-            )
-            self.result_text.grid(row=0, column=0, sticky="nsew")
-
-            y_scroll = ttk.Scrollbar(
-                text_frame, orient="vertical", command=self.result_text.yview
-            )
-            y_scroll.grid(row=0, column=1, sticky="ns")
-            self.result_text.configure(yscrollcommand=y_scroll.set)
-
-            x_scroll = ttk.Scrollbar(
-                text_frame, orient="horizontal", command=self.result_text.xview
-            )
-            x_scroll.grid(row=1, column=0, sticky="ew")
-            self.result_text.configure(xscrollcommand=x_scroll.set)
-
-        def _get_selected_years(self) -> list[int]:
-            """Odczytuje zaznaczone lata z listy w GUI."""
-
-            return [
-                int(self.years_listbox.get(index))
-                for index in self.years_listbox.curselection()
-            ]
-
-        def _get_selected_classes(self) -> list[str] | None:
-            """Odczytuje zaznaczone klasy; brak zaznaczenia oznacza wszystkie."""
-
-            classes = [
-                self.available_classes[index]
-                for index in self.classes_listbox.curselection()
-            ]
-            return classes if classes else None
-
-        def _reload_xlsx_data(self, xlsx_path: Path) -> None:
-            """Wczytuje wybrany arkusz i odświeża filtry zależne od danych."""
-
-            self.xlsx_path = xlsx_path
-            self.data_frame = load_xlsx_data(self.xlsx_path)
-            self.available_years = list_available_years_xlsx(self.data_frame)
-            self.source_var.set(str(self.xlsx_path))
-
-            self.years_listbox.delete(0, tk.END)
-            for year in self.available_years:
-                self.years_listbox.insert(tk.END, year)
-
-            if self.available_years:
-                self.calculate_button.state(["!disabled"])
-                self._select_all_years()
-                self.status_var.set("Wczytano plik danych. Kliknij \"Oblicz ranking\".")
-            else:
-                self.calculate_button.state(["disabled"])
-                self._refresh_category_choices()
-                self.status_var.set("Nie znaleziono sezonów w wybranym pliku.")
-            self._mark_result_stale()
-
-        def _choose_xlsx_file(self) -> None:
-            """Pozwala wybrać inny plik XLSX jako źródło danych."""
-
-            selected_path = filedialog.askopenfilename(
-                title="Wybierz plik XLSX z danymi",
-                initialdir=str(self.project_dir),
-                filetypes=(("Arkusz Excel", "*.xlsx"), ("Wszystkie pliki", "*.*")),
-            )
-            if not selected_path:
-                return
-
-            try:
-                self._reload_xlsx_data(Path(selected_path))
-            except Exception as exc:
-                messagebox.showerror("Błąd wczytywania danych", str(exc))
-
-        def _on_backend_changed(self, _event: tk.Event | None = None) -> None:
-            """Reaguje na zmianę backendu - odświeża UI i dane."""
-            self._update_backend_ui()
-            self._mark_result_stale()
-
-        def _update_backend_ui(self) -> None:
-            """Pokazuje/ukrywa odpowiednie pola w zależności od wybranego backendu."""
-            backend = self.backend_var.get()
-            if backend == "xlsx":
-                self.xlsx_source_label.grid()
-                self.source_var.master.grid()  # source_frame
-                self.db_source_label.grid_remove()
-                self.db_entry.master.grid_remove()  # db_frame
-                self._load_xlsx_years()
-            else:
-                self.xlsx_source_label.grid_remove()
-                self.source_var.master.grid_remove()  # source_frame
-                self.db_source_label.grid()
-                self.db_entry.master.grid()  # db_frame
-                self._load_sqlite_years()
-
-        def _load_xlsx_years(self) -> None:
-            """Ładuje lata z XLSX."""
-            self.data_frame = load_xlsx_data(self.xlsx_path) if self.xlsx_path.is_file() else None
-            self.available_years = (
-                list_available_years_xlsx(self.data_frame)
-                if self.data_frame is not None
-                else []
-            )
-            self.years_listbox.delete(0, tk.END)
-            for year in self.available_years:
-                self.years_listbox.insert(tk.END, year)
-            self._refresh_category_choices()
-            self._refresh_class_choices()
-
-        def _load_sqlite_years(self) -> None:
-            """Ładuje lata z bazy SQLite."""
-            if not self.db_var.get():
-                self.available_years = []
-            else:
-                try:
-                    from sqlite_ranking_service import get_available_years as get_available_years_sqlite
-                    self.available_years = get_available_years_sqlite(self.db_var.get())
-                except Exception as exc:
-                    self.status_var.set(f"Błąd wczytywania bazy: {exc}")
-                    self.available_years = []
-            self.years_listbox.delete(0, tk.END)
-            for year in self.available_years:
-                self.years_listbox.insert(tk.END, year)
-            self._refresh_category_choices()
-            self._refresh_class_choices()
-
-        def _choose_sqlite_db(self) -> None:
-            """Pozwala wybrać plik bazy SQLite."""
-            selected_path = filedialog.askopenfilename(
-                title="Wybierz plik bazy SQLite",
-                initialdir=str(self.project_dir),
-                filetypes=(("Baza SQLite", "*.sqlite"), ("Wszystkie pliki", "*.*")),
-            )
-            if not selected_path:
-                return
-            self.db_var.set(selected_path)
-            self._load_sqlite_years()
-
-        def _set_result_text(self, content: str) -> None:
-            """Podmienia zawartość pola tekstowego z raportem."""
-
-            self.result_text.configure(state="normal")
-            self.result_text.delete("1.0", tk.END)
-            self.result_text.insert("1.0", content)
-            self.result_text.configure(state="disabled")
-
-        def _select_all_years(self) -> None:
-            """Zaznacza wszystkie dostępne lata i odświeża stan filtrów."""
-
-            if self.available_years:
-                self.years_listbox.selection_set(0, tk.END)
-            self._refresh_category_choices()
-            self._refresh_class_choices()
-            self._mark_result_stale()
-
-        def _clear_years_selection(self) -> None:
-            """Czyści zaznaczenie lat i oznacza raport jako nieaktualny."""
-
-            self.years_listbox.selection_clear(0, tk.END)
-            self._refresh_category_choices()
-            self._refresh_class_choices()
-            self._mark_result_stale()
-
-        def _on_year_selection_change(self, _event: tk.Event | None = None) -> None:
-            """Reaguje na zmianę lat przez odświeżenie listy kategorii."""
-
-            self._refresh_category_choices()
-            self._refresh_class_choices()
-            self._mark_result_stale()
-
-        def _on_filter_changed(self, _event: tk.Event | None = None) -> None:
-            """Oznacza poprzedni wynik jako nieaktualny po zmianie filtra."""
-
-            self._mark_result_stale()
-
-        def _on_category_changed(self, _event: tk.Event | None = None) -> None:
-            """Odświeża klasy po zmianie kategorii."""
-
-            self._refresh_class_choices()
-            self._mark_result_stale()
-
-        def _select_all_classes(self) -> None:
-            """Zaznacza wszystkie dostępne klasy."""
-
-            if self.classes_listbox.size():
-                self.classes_listbox.selection_set(0, tk.END)
-            self._mark_result_stale()
-
-        def _clear_classes_selection(self) -> None:
-            """Czyści filtr klas; backend potraktuje to jako wszystkie klasy."""
-
-            self.classes_listbox.selection_clear(0, tk.END)
-            self._mark_result_stale()
-
-        def _refresh_category_choices(self) -> None:
-            """
-            Odświeża listę kategorii dostępnych dla aktualnie wybranych lat.
-
-            Dzięki temu użytkownik może wybrać tylko te rodziny kategorii,
-            dla których faktycznie istnieją pliki wejściowe.
-            """
-
-            years = self._get_selected_years()
-            if self.backend_var.get() == "sqlite":
-                categories = self._get_sqlite_categories(years)
-            elif self.data_frame is None:
-                categories = []
-            else:
-                categories = list_available_categories_for_years_xlsx(
-                    self.data_frame, years if years else None
-                )
-
-            current_category = self.category_var.get()
-            self.category_combobox.configure(values=categories)
-
-            if current_category in categories:
-                self.category_var.set(current_category)
-            elif categories:
-                self.category_var.set(categories[0])
-            else:
-                self.category_var.set("")
-
-        def _get_sqlite_categories(self, years: list[int]) -> list[str]:
-            """Pobiera dostępne kategorie z bazy SQLite."""
-            db_path = self.db_var.get()
-            if not db_path:
-                return []
-            try:
-                from sqlite_ranking_service import get_available_categories_sqlite
-                return get_available_categories_sqlite(db_path, years or None)
-            except ImportError:
-                return []
-            except Exception as exc:
-                self.status_var.set(f"Błąd odczytu kategorii z bazy: {exc}")
-                return []
-
-        def _refresh_class_choices(self) -> None:
-            """Odświeża klasy dostępne dla aktualnych lat i kategorii."""
-
-            years = self._get_selected_years()
-            category = self.category_var.get().strip()
-            previous_selection = set(self._get_selected_classes() or [])
-
-            if self.backend_var.get() == "sqlite":
-                classes = self._get_sqlite_classes(category, years)
-            elif self.data_frame is None or not category:
-                classes = []
-            else:
-                classes = list_available_classes_for_category_and_years_xlsx(
-                    self.data_frame,
-                    category,
-                    years if years else None,
-                )
-
-            self.available_classes = classes
-            self.classes_listbox.delete(0, tk.END)
-            for klasa in classes:
-                self.classes_listbox.insert(tk.END, format_class_for_display(klasa))
-                if klasa in previous_selection:
-                    self.classes_listbox.selection_set(tk.END)
-
-            if classes and not previous_selection:
-                self.classes_listbox.selection_set(0, tk.END)
-
-        def _get_sqlite_classes(self, category: str, years: list[int]) -> list[str]:
-            """Pobiera dostępne klasy z bazy SQLite."""
-            db_path = self.db_var.get()
-            if not db_path or not category:
-                return []
-            try:
-                from sqlite_ranking_service import get_available_classes as get_available_classes_sqlite
-                return get_available_classes_sqlite(db_path, category, years or None)
-            except ImportError:
-                return []
-            except Exception as exc:
-                self.status_var.set(f"Błąd odczytu klas z bazy: {exc}")
-                return []
-
-        def _mark_result_stale(self) -> None:
-            """Resetuje wynik po zmianie filtrów i blokuje zapis starego raportu."""
-
-            self.current_result = None
-            self.current_report = ""
-            self.save_button.state(["disabled"])
-            self.summary_var.set("Ranking nie został jeszcze obliczony dla bieżących filtrów.")
-            self.status_var.set("Filtry zostały zmienione. Kliknij \"Oblicz ranking\".")
-
-        def _calculate_ranking(self) -> None:
-            """
-            Uruchamia pełny backend rankingu dla aktualnie ustawionych filtrów.
-
-            Metoda waliduje wybór w GUI, wywołuje `build_new_ranking`, a potem
-            aktualizuje podsumowanie, status i treść raportu w oknie.
-            """
-
-            category = self.category_var.get().strip()
-            years = self._get_selected_years()
-            classes = self._get_selected_classes()
-
-            if not category:
-                messagebox.showerror("Brak kategorii", "Wybierz kategorię rankingu.")
-                return
-            if not years:
-                messagebox.showerror("Brak lat", "Wybierz przynajmniej jeden rok.")
-                return
-
-            backend = self.backend_var.get()
-
-            try:
-                if backend == "sqlite":
-                    db_path = self.db_var.get()
-                    if not db_path:
-                        messagebox.showerror("Brak bazy", "Wybierz plik bazy SQLite.")
-                        return
-                    result = build_new_ranking(
-                        category=category,
-                        years=years,
-                        classes=classes,
-                        backend="sqlite",
-                        db_path=db_path,
-                    )
-                else:
-                    result = build_new_ranking(
-                        file_path=self.xlsx_path,
-                        category=category,
-                        years=years,
-                        classes=classes,
-                    )
-            except Exception as exc:
-                messagebox.showerror("Błąd obliczania", str(exc))
-                return
-
-            report = format_new_ranking_report(result)
-            included_categories = ", ".join(result.included_categories) or "brak"
-
-            self.current_result = result
-            self.current_report = report
-            self._set_result_text(report)
-            self.summary_var.set(
-                f"Kategoria {result.category} | lata: {', '.join(str(year) for year in result.years)} | "
-                f"turnieje: {result.tournaments_processed} | uwzględnione kategorie: {included_categories}"
-            )
-            self.status_var.set("Ranking został obliczony.")
-            self.save_button.state(["!disabled"])
-
-        def _save_ranking(self) -> None:
-            """Zapisuje ostatnio obliczony raport do pliku wybranego w GUI."""
-
-            if not self.current_result or not self.current_report:
-                messagebox.showerror(
-                    "Brak rankingu",
-                    "Najpierw oblicz ranking, który ma zostać zapisany.",
-                )
-                return
-
-            default_path = (
-                self.project_dir
-                / "txt"
-                / build_default_new_output_filename(self.current_result)
-            )
-            output_path = filedialog.asksaveasfilename(
-                title="Zapisz ranking",
-                initialdir=str(default_path.parent),
-                initialfile=default_path.name,
-                defaultextension=".txt",
-                filetypes=(("Plik tekstowy", "*.txt"), ("Wszystkie pliki", "*.*")),
-            )
-
-            if not output_path:
-                return
-
-            try:
-                saved_path = save_new_ranking_report(self.current_report, output_path)
-            except Exception as exc:
-                messagebox.showerror("Błąd zapisu", str(exc))
-                return
-
-            self.status_var.set(f"Ranking zapisany do pliku: {saved_path}")
+    from app_gui import RankingApp
 
 
 def main() -> None:
@@ -992,6 +427,100 @@ def main() -> None:
     parser = build_argument_parser()
     args = parser.parse_args()
 
+    # --- CLI: import SQL ---
+    if args.import_sql:
+        from app_cli import run_import_sql
+        xlsx_arg, db_arg = args.import_sql
+        return run_import_sql(
+            Path(xlsx_arg), Path(db_arg),
+            sheet=args.import_sheet, replace=args.replace_db,
+        )
+
+    # --- CLI: migrations ---
+    if args.migrate:
+        from app_cli import run_migrate
+        return run_migrate(
+            Path(args.migrate),
+            target=args.migrate_target,
+            status_only=args.migrate_status,
+        )
+
+    # --- CLI: export progress ---
+    if args.export_progress:
+        from app_cli import run_export_progress
+        return run_export_progress(args, project_dir)
+
+    # --- CLI: list categories (SQLite only) ---
+    if args.list_categories:
+        if not args.db:
+            print("Błąd: --list-categories wymaga --db.", file=sys.stderr)
+            return 1
+        if not args.years:
+            print("Błąd: --list-categories wymaga --years.", file=sys.stderr)
+            return 1
+        try:
+            from sqlite_ranking_service import get_available_categories_sqlite, get_available_years, parse_years_arg
+        except ImportError as exc:
+            print(f"Błąd: Backend SQLite niedostępny: {exc}", file=sys.stderr)
+            return 1
+        db_path = Path(args.db)
+        if not db_path.is_file():
+            print(f"Błąd: Nie znaleziono bazy: {db_path}", file=sys.stderr)
+            return 1
+        years = parse_years_arg(args.years)
+        categories = get_available_categories_sqlite(db_path, years)
+        print("Dostępne kategorie:", ", ".join(categories))
+        return 0
+
+    # --- CLI: list classes (SQLite only) ---
+    if args.list_classes:
+        if not args.db:
+            print("Błąd: --list-classes wymaga --db.", file=sys.stderr)
+            return 1
+        if not args.years:
+            print("Błąd: --list-classes wymaga --years.", file=sys.stderr)
+            return 1
+        if not args.category:
+            print("Błąd: --list-classes wymaga --category.", file=sys.stderr)
+            return 1
+        try:
+            from sqlite_ranking_service import get_available_classes, parse_years_arg
+        except ImportError as exc:
+            print(f"Błąd: Backend SQLite niedostępny: {exc}", file=sys.stderr)
+            return 1
+        db_path = Path(args.db)
+        if not db_path.is_file():
+            print(f"Błąd: Nie znaleziono bazy: {db_path}", file=sys.stderr)
+            return 1
+        years = parse_years_arg(args.years)
+        classes = get_available_classes(db_path, args.category, years)
+        print("Dostępne klasy:", ", ".join(classes))
+        return 0
+
+    # --- CLI: list years (SQLite only) ---
+    if args.list_years:
+        if not args.db:
+            print("Błąd: --list-years wymaga --db.", file=sys.stderr)
+            return 1
+        try:
+            from sqlite_ranking_service import get_available_years
+        except ImportError as exc:
+            print(f"Błąd: Backend SQLite niedostępny: {exc}", file=sys.stderr)
+            return 1
+        db_path = Path(args.db)
+        if not db_path.is_file():
+            print(f"Błąd: Nie znaleziono bazy: {db_path}", file=sys.stderr)
+            return 1
+        years = get_available_years(db_path)
+        print("Dostępne lata:", ", ".join(map(str, years)))
+        return 0
+
+    # --- CLI: plot ---
+    if args.plot or args.list_pairs:
+        from app_cli import run_plot
+        return run_plot(args, project_dir)
+
+    # --- CLI: ranking (existing logic) ---
     has_cli_arguments = bool(
         args.input_excel
         or args.category
@@ -1005,7 +534,7 @@ def main() -> None:
         raise SystemExit(run_cli_interactive(project_dir))
 
     if has_cli_arguments:
-        raise SystemExit(run_cli_from_args(args, project_dir))
+        raise SystemExit(run_new_cli_from_args(args, project_dir))
 
     if tk is None:
         print("Moduł tkinter nie jest dostępny. Uruchamiam tryb terminalowy.")

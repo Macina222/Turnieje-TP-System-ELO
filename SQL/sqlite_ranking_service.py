@@ -216,7 +216,7 @@ def fetch_events(
             CASE WHEN t.event_date IS NOT NULL THEN 0 ELSE 1 END,
             t.event_date ASC,
             t.season ASC,
-            source_order ASC,
+            source_order DESC,
             e.event_id ASC
     """
     with _connect(db_path) as con:
